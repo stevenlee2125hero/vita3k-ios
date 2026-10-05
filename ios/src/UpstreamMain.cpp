@@ -2336,8 +2336,17 @@ std::optional<AppLaunchRequest> choose_boot_title(EmuEnvState &emuenv) {
             const std::string share_path = g_import_job->share_path;
             const auto installed_applications = g_import_job->installed_applications;
             g_import_job.reset();
-            if (rescan_apps && !was_firmware && !app::init_apps_list(emuenv))
-                LOG_ERROR("Failed to rescan apps list after import.");
+            if (rescan_apps && !was_firmware) {
+                // A successful archive import must be reflected immediately.
+                // Do a real disk scan here instead of init_apps_list(), which may
+                // legally reuse apps-cache.xml. On iOS the archive installer can
+                // commit a new ux0/app directory within the same filesystem
+                // timestamp granularity as the cache snapshot, causing a valid
+                // install to report success while the native library remains
+                // stale until the next launch.
+                if (!app::scan_apps(emuenv))
+                    LOG_ERROR("Failed to force-scan apps list after import.");
+            }
             if (rescan_apps || (success && refresh_library)) {
                 games = native_games(emuenv);
                 vita3k_ios_update_library(games, native_settings(emuenv));
