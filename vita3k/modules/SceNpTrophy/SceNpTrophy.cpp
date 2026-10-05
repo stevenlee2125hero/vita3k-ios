@@ -17,8 +17,8 @@
 
 #include <module/module.h>
 
-#include <np/functions.h>
 #include <io/state.h>
+#include <np/functions.h>
 #include <np/state.h>
 #include <np/trophy/context.h>
 #include <rtc/rtc.h>
