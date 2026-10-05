@@ -2378,6 +2378,19 @@ std::optional<AppLaunchRequest> choose_boot_title(EmuEnvState &emuenv) {
                         break;
                     }
                 }
+                // Pre-install trophy metadata before handing control to the guest.
+                // Some titles, including PCSG01112 / Undertale, can stall on the
+                // first-run "Installing trophies" screen on iOS while creating
+                // their trophy context. Doing this once in the frontend avoids
+                // blocking game startup on the guest-side TRP extraction path.
+                if (!g_current_trophy_id.empty() && !g_current_title_id.empty()) {
+                    const bool trophy_ready = install_trophy_metadata_for_title(
+                        emuenv, g_current_title_id, g_current_trophy_id);
+                    LOG_INFO("Preflight trophy metadata for {} ({}): {}",
+                        g_current_title_id, g_current_trophy_id,
+                        trophy_ready ? "ready" : "unavailable; continuing");
+                }
+
                 LOG_INFO("Booting selected iOS library title: {}", action->app_path);
                 g_pending_game_settings = action->has_settings_override
                     ? std::optional(action->settings)
