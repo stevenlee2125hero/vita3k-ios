@@ -152,6 +152,19 @@ std::string install_target(const sfo::SfoAppInfo &app) {
     return "ux0/app/" + app.app_title_id;
 }
 
+bool archive_has_relative_file(mz_zip_archive &zip, std::string_view root, std::string_view relative) {
+    const auto entry_count = mz_zip_reader_get_num_files(&zip);
+    const std::string expected = std::string(root) + std::string(relative);
+    for (mz_uint index = 0; index < entry_count; ++index) {
+        if (mz_zip_reader_is_file_a_directory(&zip, index))
+            continue;
+        std::string name;
+        if (read_archive_path(zip, index, name) && name == expected)
+            return true;
+    }
+    return false;
+}
+
 ArchiveInspection inspect_open_archive(mz_zip_archive &zip) {
     ArchiveInspection result{ .inspected = true };
     const auto entry_count = static_cast<std::size_t>(mz_zip_reader_get_num_files(&zip));
@@ -292,6 +305,32 @@ ArchiveInstallResult install_archive_transactionally(const std::filesystem::path
         result.detail = "Installation rejected: archive exceeds the 32 GiB safety limit.";
         mz_zip_reader_end(&zip);
         return result;
+    }
+
+    // Some legacy Vita full-game dumps (notably MaiDumpTool archives) carry
+    // CATEGORY=gp even though the archive is a complete runnable application,
+    // not an update package. Desktop workflows historically tolerated these
+    // layouts, while the strict iOS importer placed them under ux0/patch and
+    // then the library quite correctly showed nothing because no ux0/app base
+    // existed. Promote only archives with an explicit MaiDump marker and no
+    // existing base title. Real gp patch archives remain patches.
+    for (auto &application : inspection.applications) {
+        if (application.category.find("gp") == std::string::npos)
+            continue;
+        const auto base_path = vfs_root / "ux0/app" / application.title_id;
+        const bool base_exists = std::filesystem::exists(base_path);
+        const bool legacy_full_dump =
+            archive_has_relative_file(zip, application.content_root, "mai_moe/load_type.mai")
+            || archive_has_relative_file(zip, application.content_root, "mai_moe/mai.suprx");
+        if (!base_exists && legacy_full_dump) {
+            LOG_WARN("Archive install: treating legacy Mai full dump {} as base application", application.title_id);
+            application.install_target = "ux0/app/" + application.title_id;
+        } else if (!base_exists) {
+            result.detail = "Installation rejected: update/patch " + application.title_id
+                + " has no installed base game. Install the base game first.";
+            mz_zip_reader_end(&zip);
+            return result;
+        }
     }
 
     std::set<std::string> unique_targets;
