@@ -226,6 +226,11 @@ EXPORT(int, sceNpTrophyGetGameIcon, np::trophy::ContextHandle context_handle, Sc
     void *buffer, SceSize *size) {
     TRACY_FUNC(sceNpTrophyGetGameIcon, context_handle, api_handle, buffer, size);
     NP_TROPHY_GET_FUNCTION_STARTUP(context_handle)
+    if (pcsg01112_trophy_bypass(emuenv)) {
+        *size = 0;
+        LOG_WARN("PCSG01112 trophy bypass: returning empty game icon");
+        return 0;
+    }
     return context->copy_file_data_from_trophy_file("ICON0.PNG", buffer, size);
 }
 
@@ -333,6 +338,10 @@ EXPORT(int, sceNpTrophyGetGameInfo, np::trophy::ContextHandle context_handle, Sc
 
 EXPORT(int, sceNpTrophyGetGroupIcon) {
     TRACY_FUNC(sceNpTrophyGetGroupIcon);
+    if (pcsg01112_trophy_bypass(emuenv)) {
+        LOG_WARN("PCSG01112 trophy bypass: ignoring group icon request");
+        return 0;
+    }
     return UNIMPLEMENTED();
 }
 
@@ -350,6 +359,25 @@ EXPORT(int, sceNpTrophyGetGroupInfo, np::trophy::ContextHandle context_handle, S
         || (details && (details->size != sizeof(*details)))
         || (data && (data->size != sizeof(*data)))) {
         return RET_ERROR(SCE_NP_TROPHY_ERROR_INVALID_ARGUMENT);
+    }
+
+    if (pcsg01112_trophy_bypass(emuenv)) {
+        if (details) {
+            const auto size = details->size;
+            std::memset(details, 0, sizeof(*details));
+            details->size = size;
+            details->groupId = group_id;
+            static constexpr char kUndertaleTitle[] = "Undertale";
+            std::memcpy(details->title, kUndertaleTitle, sizeof(kUndertaleTitle));
+        }
+        if (data) {
+            const auto size = data->size;
+            std::memset(data, 0, sizeof(*data));
+            data->size = size;
+            data->groupId = group_id;
+        }
+        LOG_WARN("PCSG01112 trophy bypass: returning empty group trophy info");
+        return 0;
     }
 
     np::trophy::Context *context = get_trophy_context(emuenv.np.trophy_state, context_handle);
@@ -425,6 +453,11 @@ EXPORT(int, sceNpTrophyGetTrophyIcon, np::trophy::ContextHandle context_handle, 
     SceNpTrophyID trophy_id, void *buffer, SceSize *size) {
     TRACY_FUNC(sceNpTrophyGetTrophyIcon, context_handle, api_handle, trophy_id, buffer, size);
     NP_TROPHY_GET_FUNCTION_STARTUP(context_handle)
+    if (pcsg01112_trophy_bypass(emuenv)) {
+        *size = 0;
+        LOG_WARN("PCSG01112 trophy bypass: returning empty trophy icon {}", trophy_id);
+        return 0;
+    }
 
     // Trophy should only be in this region
     if (trophy_id < 0 || trophy_id >= np::trophy::MAX_TROPHIES) {
@@ -449,6 +482,24 @@ EXPORT(int, sceNpTrophyGetTrophyInfo, np::trophy::ContextHandle context_handle, 
         || (details && (details->size != sizeof(SceNpTrophyDetails)))
         || (data && (data->size != sizeof(SceNpTrophyData)))) {
         return RET_ERROR(SCE_NP_TROPHY_ERROR_INVALID_ARGUMENT);
+    }
+
+    if (pcsg01112_trophy_bypass(emuenv)) {
+        if (details) {
+            const auto size = details->size;
+            std::memset(details, 0, sizeof(*details));
+            details->size = size;
+            details->trophyId = trophy_id;
+            details->trophyGrade = np::trophy::SceNpTrophyGrade::SCE_NP_TROPHY_GRADE_BRONZE;
+        }
+        if (data) {
+            const auto size = data->size;
+            std::memset(data, 0, sizeof(*data));
+            data->size = size;
+            data->trophyId = trophy_id;
+        }
+        LOG_WARN("PCSG01112 trophy bypass: returning dummy trophy info {}", trophy_id);
+        return 0;
     }
 
     np::trophy::Context *context = get_trophy_context(emuenv.np.trophy_state, context_handle);
