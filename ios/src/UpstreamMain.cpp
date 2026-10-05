@@ -2383,12 +2383,15 @@ std::optional<AppLaunchRequest> choose_boot_title(EmuEnvState &emuenv) {
                 // first-run "Installing trophies" screen on iOS while creating
                 // their trophy context. Doing this once in the frontend avoids
                 // blocking game startup on the guest-side TRP extraction path.
-                if (!g_current_trophy_id.empty() && !g_current_title_id.empty()) {
+                if (!g_current_trophy_id.empty() && !g_current_title_id.empty()
+                    && g_current_title_id != "PCSG01112") {
                     const bool trophy_ready = install_trophy_metadata_for_title(
                         emuenv, g_current_title_id, g_current_trophy_id);
                     LOG_INFO("Preflight trophy metadata for {} ({}): {}",
                         g_current_title_id, g_current_trophy_id,
                         trophy_ready ? "ready" : "unavailable; continuing");
+                } else if (g_current_title_id == "PCSG01112") {
+                    LOG_WARN("PCSG01112 trophy bypass: skipping frontend trophy preflight");
                 }
 
                 LOG_INFO("Booting selected iOS library title: {}", action->app_path);
