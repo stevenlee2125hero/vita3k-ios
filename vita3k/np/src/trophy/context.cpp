@@ -445,7 +445,18 @@ np::trophy::ContextHandle create_trophy_context(NpState &np, IOState *io, const 
     new_context->lang = lang;
     new_context->trophy_file.header_parse();
 
-    new_context->install_trophy_conf(io, vita_fs_path, unique_trophy_folder);
+    // The iOS frontend may already have extracted the trophy metadata before
+    // launch. Avoid doing the same TRP extraction again from inside
+    // sceNpTrophyCreateContext; that redundant path can stall iOS titles at
+    // their first-run "Installing trophies" screen.
+    const fs::path preinstalled_trophy_conf = vita_fs_path / "ux0" / "user"
+        / io->user_id / "trophy" / "conf" / unique_trophy_folder / "TROPCONF.SFM";
+    if (!fs::exists(preinstalled_trophy_conf)) {
+        new_context->install_trophy_conf(io, vita_fs_path, unique_trophy_folder);
+    } else {
+        LOG_INFO("Trophy metadata already installed at {}; skipping TRP re-extraction",
+            preinstalled_trophy_conf);
+    }
 
     if (trophy_progress_file_inp > 0) {
         new_context->load_trophy_progress_file(trophy_progress_file_inp);
