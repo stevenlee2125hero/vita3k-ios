@@ -388,6 +388,39 @@ np::trophy::ContextHandle create_trophy_context(NpState &np, IOState *io, const 
     if (error)
         *error = np::NpTrophyError::TROPHY_ERROR_NONE;
 
+    // Undertale (PCSG01112) shows a first-run "Installing trophies" screen
+    // while waiting for the Vita trophy context. Its TRP path can stall on
+    // iOS, so give this title a lightweight in-memory trophy context instead
+    // of parsing/extracting TROPHY.TRP. Trophy unlocks are intentionally
+    // disabled for this title; game startup takes priority over achievements.
+    if (io && io->title_id == "PCSG01112") {
+        for (auto &context : np.trophy_state.contexts) {
+            if (context.valid && context.comm_id == *custom_comm) {
+                LOG_WARN("PCSG01112 trophy bypass: reusing synthetic context {}", context.id);
+                return context.id;
+            }
+        }
+
+        np.trophy_state.contexts.emplace_back();
+        auto &context = np.trophy_state.contexts.back();
+        context.valid = true;
+        context.comm_id = *custom_comm;
+        context.id = static_cast<np::trophy::ContextHandle>(np.trophy_state.contexts.size());
+        context.trophy_file_stream = -1;
+        context.io = io;
+        context.vita_fs_path = vita_fs_path;
+        context.group_count = 0;
+        context.trophy_count = 0;
+        std::fill(std::begin(context.trophy_progress), std::end(context.trophy_progress), 0);
+        std::fill(std::begin(context.trophy_availability), std::end(context.trophy_availability), 0);
+        context.trophy_count_by_group.fill(0);
+        context.unlock_timestamps.fill(0);
+        context.trophy_kinds.fill(np::trophy::SceNpTrophyGrade::SCE_NP_TROPHY_GRADE_UNKNOWN);
+        context.platinum_trophy_id = np::SCE_NP_TROPHY_INVALID_TROPHY_ID;
+        LOG_WARN("PCSG01112 trophy bypass: created synthetic context {}", context.id);
+        return context.id;
+    }
+
 #define TROPHY_RET_ERROR(err)            \
     if (error)                           \
         *error = np::NpTrophyError::err; \
@@ -487,7 +520,8 @@ bool destroy_trophy_context(NpTrophyState &state, const np::trophy::ContextHandl
         return false;
     }
 
-    close_file(*state.contexts[handle - 1].io, state.contexts[handle - 1].trophy_file_stream, "destroy_trophy_context");
+    if (state.contexts[handle - 1].trophy_file_stream >= 0)
+        close_file(*state.contexts[handle - 1].io, state.contexts[handle - 1].trophy_file_stream, "destroy_trophy_context");
     state.contexts[handle - 1].valid = false;
 
     return true;
