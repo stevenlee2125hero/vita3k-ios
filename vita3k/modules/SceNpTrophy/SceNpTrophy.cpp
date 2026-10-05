@@ -18,6 +18,7 @@
 #include <module/module.h>
 
 #include <np/functions.h>
+#include <io/state.h>
 #include <np/state.h>
 #include <np/trophy/context.h>
 #include <rtc/rtc.h>
@@ -244,7 +245,8 @@ EXPORT(int, sceNpTrophyGetGameInfo, np::trophy::ContextHandle context_handle, Sc
             const auto size = details->size;
             std::memset(details, 0, sizeof(*details));
             details->size = size;
-            std::strncpy(details->title, "Undertale", sizeof(details->title) - 1);
+            static constexpr char kUndertaleTitle[] = "Undertale";
+            std::memcpy(details->title, kUndertaleTitle, sizeof(kUndertaleTitle));
         }
         if (data) {
             const auto size = data->size;
