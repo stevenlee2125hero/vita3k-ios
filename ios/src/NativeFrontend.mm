@@ -1138,19 +1138,33 @@ static UIViewController *library_presented_controller() {
             __block BOOL copied = NO;
             __block NSError *copyError = directoryError;
             if (documents && !directoryError) {
-                NSFileCoordinator *coordinator =
-                    [[NSFileCoordinator alloc] initWithFilePresenter:nil];
-                NSError *coordinationError = nil;
-                [coordinator coordinateReadingItemAtURL:url
-                                               options:NSFileCoordinatorReadingWithoutChanges
-                                                 error:&coordinationError
-                                            byAccessor:^(NSURL *coordinatedURL) {
-                                                copied = [manager copyItemAtURL:coordinatedURL
-                                                                         toURL:destination
-                                                                         error:&copyError];
-                                            }];
-                if (!copyError)
-                    copyError = coordinationError;
+                // UIDocumentPicker uses asCopy:YES, so the selected URL already
+                // refers to a private copy materialized for this app. Moving
+                // that copy into our durable staging directory is effectively
+                // metadata-only on the same APFS volume and avoids duplicating
+                // multi-gigabyte VPK/ZIP files. This matters for 3-5+ GiB games,
+                // where a second full copy can consume several extra gigabytes
+                // and appear to hang.
+                NSError *moveError = nil;
+                copied = [manager moveItemAtURL:url toURL:destination error:&moveError];
+                if (!copied) {
+                    // Some File Providers do not allow moving their temporary
+                    // copy. Fall back to the coordinated copy path.
+                    copyError = nil;
+                    NSFileCoordinator *coordinator =
+                        [[NSFileCoordinator alloc] initWithFilePresenter:nil];
+                    NSError *coordinationError = nil;
+                    [coordinator coordinateReadingItemAtURL:url
+                                                   options:NSFileCoordinatorReadingWithoutChanges
+                                                     error:&coordinationError
+                                                byAccessor:^(NSURL *coordinatedURL) {
+                                                    copied = [manager copyItemAtURL:coordinatedURL
+                                                                             toURL:destination
+                                                                             error:&copyError];
+                                                }];
+                    if (!copyError)
+                        copyError = coordinationError ?: moveError;
+                }
             }
 
             if (scoped)
