@@ -137,6 +137,10 @@ struct SceNpTrophyData {
     SceRtcTick timestamp;
 };
 
+static bool pcsg01112_trophy_bypass(const EmuEnvState &emuenv) {
+    return emuenv.io.title_id == "PCSG01112";
+}
+
 EXPORT(int, sceNpTrophyAbortHandle) {
     TRACY_FUNC(sceNpTrophyAbortHandle);
     STUBBED("Stubbed with SCE_OK");
@@ -228,6 +232,27 @@ EXPORT(int, sceNpTrophyGetGameInfo, np::trophy::ContextHandle context_handle, Sc
     TRACY_FUNC(sceNpTrophyGetGameInfo, context_handle, api_handle, details, data);
     if (!emuenv.np.trophy_state.inited) {
         return RET_ERROR(SCE_NP_TROPHY_ERROR_NOT_INITIALIZED);
+    }
+
+    if (pcsg01112_trophy_bypass(emuenv)) {
+        if ((context_handle == np::trophy::INVALID_CONTEXT_HANDLE) || (api_handle == -1)
+            || (!details && !data)
+            || (details && details->size != sizeof(SceNpTrophyGameDetails))
+            || (data && data->size != sizeof(SceNpTrophyGameData)))
+            return RET_ERROR(SCE_NP_TROPHY_ERROR_INVALID_ARGUMENT);
+        if (details) {
+            const auto size = details->size;
+            std::memset(details, 0, sizeof(*details));
+            details->size = size;
+            std::strncpy(details->title, "Undertale", sizeof(details->title) - 1);
+        }
+        if (data) {
+            const auto size = data->size;
+            std::memset(data, 0, sizeof(*data));
+            data->size = size;
+        }
+        LOG_WARN("PCSG01112 trophy bypass: returning empty game trophy info");
+        return 0;
     }
 
     if ((context_handle == np::trophy::INVALID_CONTEXT_HANDLE)
@@ -471,6 +496,13 @@ EXPORT(int, sceNpTrophyGetTrophyUnlockState, np::trophy::ContextHandle context_h
         return SCE_NP_TROPHY_ERROR_INVALID_ARGUMENT;
     }
 
+    if (pcsg01112_trophy_bypass(emuenv)) {
+        std::memset(flag_array, 0, sizeof(np::trophy::TrophyFlagArray));
+        *count = 0;
+        LOG_WARN("PCSG01112 trophy bypass: returning empty unlock state");
+        return 0;
+    }
+
     // Get context
     np::trophy::Context *context = get_trophy_context(emuenv.np.trophy_state, context_handle);
     if (!context) {
@@ -553,6 +585,13 @@ EXPORT(int, sceNpTrophyUnlockTrophy, np::trophy::ContextHandle context_handle, S
     TRACY_FUNC(sceNpTrophyUnlockTrophy, context_handle, api_handle, trophy_id, platinum_id);
     if (!emuenv.np.trophy_state.inited) {
         return SCE_NP_TROPHY_ERROR_NOT_INITIALIZED;
+    }
+
+    if (pcsg01112_trophy_bypass(emuenv)) {
+        if (platinum_id)
+            *platinum_id = np::SCE_NP_TROPHY_INVALID_TROPHY_ID;
+        LOG_WARN("PCSG01112 trophy bypass: ignoring trophy unlock {}", trophy_id);
+        return 0;
     }
 
     // Trophy should only be in this region
