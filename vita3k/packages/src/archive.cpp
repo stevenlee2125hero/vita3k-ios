@@ -7,6 +7,7 @@
 #include <miniz.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <fstream>
@@ -339,7 +340,7 @@ ArchiveInstallResult install_archive_transactionally(const std::filesystem::path
         return result;
     }
 
-    const auto inspection = inspect_open_archive(zip);
+    auto inspection = inspect_open_archive(zip);
     if (!inspection.valid) {
         result.detail = "Installation rejected: " + inspection.detail;
         mz_zip_reader_end(&zip);
