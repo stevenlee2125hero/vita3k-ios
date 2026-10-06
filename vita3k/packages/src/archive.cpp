@@ -165,6 +165,50 @@ bool archive_has_relative_file(mz_zip_archive &zip, std::string_view root, std::
     return false;
 }
 
+struct ArchiveInstallMapping {
+    std::string content_root;
+    std::string install_target;
+};
+
+bool detect_legacy_vita_tree_mapping(std::string_view name, ArchiveInstallMapping &mapping) {
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 7> roots = {{
+        { "app", "ux0/app" },
+        { "patch", "ux0/patch" },
+        { "addcont", "ux0/addcont" },
+        { "addcount", "ux0/addcont" },
+        { "repatch", "ux0/rePatch" },
+        { "license", "ux0/license" },
+        { "lisense", "ux0/license" },
+    }};
+
+    std::size_t segment_start = 0;
+    while (segment_start < name.size()) {
+        const auto segment_end = name.find('/', segment_start);
+        if (segment_end == std::string_view::npos)
+            break;
+        const auto segment = name.substr(segment_start, segment_end - segment_start);
+
+        for (const auto &[source_root, target_root] : roots) {
+            if (segment != source_root)
+                continue;
+            const auto title_start = segment_end + 1;
+            const auto title_end = name.find('/', title_start);
+            if (title_end == std::string_view::npos)
+                continue;
+            const auto title_id = name.substr(title_start, title_end - title_start);
+            if (!safe_title_id(title_id))
+                continue;
+
+            mapping.content_root = std::string(name.substr(0, title_end + 1));
+            mapping.install_target = std::string(target_root) + "/" + std::string(title_id);
+            return true;
+        }
+
+        segment_start = segment_end + 1;
+    }
+    return false;
+}
+
 ArchiveInspection inspect_open_archive(mz_zip_archive &zip) {
     ArchiveInspection result{ .inspected = true };
     const auto entry_count = static_cast<std::size_t>(mz_zip_reader_get_num_files(&zip));
@@ -333,12 +377,42 @@ ArchiveInstallResult install_archive_transactionally(const std::filesystem::path
         }
     }
 
+    std::vector<ArchiveInstallMapping> mappings;
+    mappings.reserve(inspection.applications.size() + 8);
+    for (const auto &application : inspection.applications)
+        mappings.push_back({ application.content_root, application.install_target });
+
+    // NNP/NoNpDrm-style ZIPs are filesystem bundles rather than a single VPK.
+    // Besides app/patch they can contain rePatch and license trees that have no
+    // PARAM.SFO of their own, so a param-only importer silently skipped them.
+    // Discover those title-scoped trees and preserve them in the emulated Vita
+    // filesystem. A wrapper directory around the bundle is allowed.
+    const auto mapping_entry_count = mz_zip_reader_get_num_files(&zip);
+    for (mz_uint index = 0; index < mapping_entry_count; ++index) {
+        if (mz_zip_reader_is_file_a_directory(&zip, index))
+            continue;
+        std::string name;
+        if (!read_archive_path(zip, index, name) || !safe_archive_path(name))
+            continue;
+        ArchiveInstallMapping candidate;
+        if (!detect_legacy_vita_tree_mapping(name, candidate))
+            continue;
+        const bool exists = std::ranges::any_of(mappings, [&](const auto &mapping) {
+            return mapping.content_root == candidate.content_root
+                && mapping.install_target == candidate.install_target;
+        });
+        if (!exists)
+            mappings.push_back(std::move(candidate));
+    }
+
     std::set<std::string> unique_targets;
-    for (const auto &application : inspection.applications) {
-        if (!unique_targets.insert(application.install_target).second) {
-            result.detail = "Installation rejected: multiple archive roots resolve to the same Vita target.";
-            mz_zip_reader_end(&zip);
-            return result;
+    for (const auto &mapping : mappings) {
+        if (!unique_targets.insert(mapping.install_target).second) {
+            // Multiple source roots for the same target are valid in legacy
+            // bundles only when one is the PARAM.SFO-derived application root
+            // and the other is its filesystem-tree alias. Keep the longest
+            // root for extraction and collapse duplicates here.
+            continue;
         }
     }
 
@@ -394,12 +468,13 @@ ArchiveInstallResult install_archive_transactionally(const std::filesystem::path
         if (!read_archive_path(zip, index, name) || !safe_archive_path(name))
             return fail("Installation rejected an unsafe archive path during extraction.");
 
-        const ArchiveApplicationInfo *owner = nullptr;
+        const ArchiveInstallMapping *owner = nullptr;
         std::string_view relative;
-        for (const auto &application : inspection.applications) {
-            if (name.starts_with(application.content_root) && (!owner || application.content_root.size() > owner->content_root.size())) {
-                owner = &application;
-                relative = std::string_view(name).substr(application.content_root.size());
+        for (const auto &mapping : mappings) {
+            if (name.starts_with(mapping.content_root)
+                && (!owner || mapping.content_root.size() > owner->content_root.size())) {
+                owner = &mapping;
+                relative = std::string_view(name).substr(mapping.content_root.size());
             }
         }
         if (!owner || relative.empty())
@@ -440,17 +515,20 @@ ArchiveInstallResult install_archive_transactionally(const std::filesystem::path
         bool installed{};
     };
     std::vector<TargetMove> moves;
-    moves.reserve(inspection.applications.size());
-    for (const auto &application : inspection.applications) {
-        const auto relative_target = std::filesystem::path(application.install_target);
+    std::set<std::string> committed_targets;
+    moves.reserve(mappings.size());
+    for (const auto &mapping : mappings) {
+        if (!committed_targets.insert(mapping.install_target).second)
+            continue;
+        const auto relative_target = std::filesystem::path(mapping.install_target);
         if (existing_parent_has_symlink(vfs_root, relative_target.parent_path(), error)) {
             cleanup();
             result.detail = "Installation rejected a symlinked Vita destination path.";
             return result;
         }
-        moves.push_back({ .staged = payload_root / application.install_target,
-            .destination = vfs_root / application.install_target,
-            .backup = backup_root / application.install_target });
+        moves.push_back({ .staged = payload_root / mapping.install_target,
+            .destination = vfs_root / mapping.install_target,
+            .backup = backup_root / mapping.install_target });
         if (!std::filesystem::exists(moves.back().staged, error) || error) {
             cleanup();
             result.detail = "Installation transaction is missing a staged application root.";
