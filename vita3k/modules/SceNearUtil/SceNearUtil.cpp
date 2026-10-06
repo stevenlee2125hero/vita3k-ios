@@ -94,7 +94,11 @@ EXPORT(int, sceNearIgnoreDiscoveredGift) {
 }
 
 EXPORT(int, sceNearInitialize) {
-    return UNIMPLEMENTED();
+    // near is a discontinued network/location service. Games such as
+    // Uncharted: Golden Abyss initialise it opportunistically and can
+    // continue without the service. Returning an HLE success result here
+    // prevents callers from following an invalid/uninitialised error path.
+    return 0;
 }
 
 EXPORT(int, sceNearLaunchNearAppForDownload) {
