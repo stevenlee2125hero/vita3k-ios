@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - ios-upstream-core
+      - fix-uncharted-golden-abyss
     paths:
       - "CMakeLists.txt"
       - "vcpkg.json"
