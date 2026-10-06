@@ -2600,8 +2600,8 @@ void fatal_signal_handler(int sig, siginfo_t *info, void *uct) {
     }
     // Not async-signal-safe, but the process is dying anyway and this is the
     // only channel that reaches the log before the kill.
-    LOG_CRITICAL("FATAL SIGNAL {}: PC=0x{:X} (image '{}' +0x{:X}) fault_addr=0x{:X} available_mem={} MiB",
-        sig, pc, image, image_base ? pc - image_base : 0,
+    LOG_CRITICAL("FATAL SIGNAL {}: title_id='{}' PC=0x{:X} (image '{}' +0x{:X}) fault_addr=0x{:X} available_mem={} MiB",
+        sig, g_current_title_id, pc, image, image_base ? pc - image_base : 0,
         info ? reinterpret_cast<uintptr_t>(info->si_addr) : 0,
         static_cast<unsigned long long>(os_proc_available_memory() / (1024 * 1024)));
 
