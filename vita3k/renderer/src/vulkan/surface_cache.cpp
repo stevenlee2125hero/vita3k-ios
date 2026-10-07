@@ -532,6 +532,23 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
 
     ColorSurfaceCacheInfo &info = *ite->second;
 
+#ifdef VITA3K_PLATFORM_IOS
+    // Diagnostic only: characterize Golden Abyss render-target reuse without
+    // changing GPU synchronization or introducing CPU readback stalls.
+    // Limit output to the first 120 samples to keep on-device logs bounded.
+    static uint32_t rt_lookup_samples = 0;
+    if (rt_lookup_samples < 120) {
+        ++rt_lookup_samples;
+        LOG_INFO("iOS RT texture lookup #{} addr=0x{:08X} surface=0x{:08X} requested={}x{} stored={}x{} "
+                 "format={}/{} tiling={}/{} stride={}/{} dirty={} last_rendered={}",
+            rt_lookup_samples, address, ite->first, original_width, original_height,
+            info.original_width, info.original_height, static_cast<int>(base_format),
+            static_cast<int>(info.format), static_cast<int>(tiling),
+            static_cast<int>(info.tiling), stride_bytes, info.stride_bytes,
+            static_cast<int>(*info.dirty), info.last_frame_rendered);
+    }
+#endif
+
     if ((base_format == SCE_GXM_COLOR_BASE_FORMAT_U8U8U8 || info.format == SCE_GXM_COLOR_BASE_FORMAT_U8U8U8)
         && base_format != info.format)
         // don't even try to match u8u8u8 with something else
