@@ -5375,20 +5375,21 @@ EXPORT(int, sceGxmTextureSetStride, SceGxmTexture *texture, uint32_t byteStride)
 }
 
 static bool verify_texture_mode(SceGxmTexture *texture, SceGxmTextureAddrMode mode) {
-    if ((texture->type << 29) == SCE_GXM_TEXTURE_CUBE || (texture->type << 29) == SCE_GXM_TEXTURE_CUBE_ARBITRARY) {
-        if (mode != SCE_GXM_TEXTURE_ADDR_CLAMP) {
-            return false;
-        }
-    } else {
-        if (mode <= SCE_GXM_TEXTURE_ADDR_CLAMP_HALF_BORDER && mode >= SCE_GXM_TEXTURE_ADDR_REPEAT_IGNORE_BORDER) {
-            if ((texture->type << 29) != SCE_GXM_TEXTURE_SWIZZLED) {
-                return false;
-            }
-        }
-        if (mode == SCE_GXM_TEXTURE_ADDR_MIRROR && ((texture->type << 29) != SCE_GXM_TEXTURE_SWIZZLED)) {
-            return false;
-        }
-    }
+    const auto type = static_cast<SceGxmTextureType>(texture->type << 29);
+    if (type == SCE_GXM_TEXTURE_CUBE || type == SCE_GXM_TEXTURE_CUBE_ARBITRARY)
+        return mode == SCE_GXM_TEXTURE_ADDR_CLAMP;
+
+    // GXM accepts the extended border address modes for arbitrary/swizzled
+    // textures as well as the ordinary swizzled type. The old check rejected
+    // them before the renderer could translate the sampler, which breaks
+    // post-processing chains used by Golden Abyss.
+    const bool swizzled = type == SCE_GXM_TEXTURE_SWIZZLED
+        || type == SCE_GXM_TEXTURE_SWIZZLED_ARBITRARY;
+    if (mode >= SCE_GXM_TEXTURE_ADDR_REPEAT_IGNORE_BORDER
+        && mode <= SCE_GXM_TEXTURE_ADDR_CLAMP_HALF_BORDER && !swizzled)
+        return false;
+    if (mode == SCE_GXM_TEXTURE_ADDR_MIRROR && !swizzled)
+        return false;
     return true;
 }
 
