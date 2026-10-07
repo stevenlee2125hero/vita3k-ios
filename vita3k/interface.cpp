@@ -468,29 +468,6 @@ static ExitCode load_app_impl(SceUID &main_module_id, EmuEnvState &emuenv, const
 
     init_exported_vars(emuenv);
 
-    // MaiDump titles can use a small launcher eboot that loads mai.suprx and
-    // then hands off to a secondary SELF through sceAppMgrLoadExec (Golden
-    // Abyss is one of these titles).  The iOS frontend implements LoadExec by
-    // rebuilding the emulator session, so modules loaded by the launcher do
-    // not survive into the new process.  Restore the Mai runtime before
-    // linking the requested SELF; otherwise Mai file/resource hooks are lost
-    // and modified/localised assets can silently fall back to the base game.
-    // Keep this strictly gated to LoadExec + an installed Mai runtime so
-    // ordinary/NoNpDrm titles are unaffected.
-    if (launch_request.reason == AppLaunchReason::LoadExec) {
-        const auto mai_runtime_path = emuenv.vita_fs_path / "ux0/app" / emuenv.io.app_path / "mai_moe/mai.suprx";
-        if (fs::exists(mai_runtime_path)) {
-            const auto mai_module_id = load_module(emuenv, "app0:mai_moe/mai.suprx");
-            if (mai_module_id >= 0) {
-                LOG_INFO("MaiDump LoadExec: restored mai.suprx before secondary SELF '{}'.",
-                    launch_request.self_path);
-            } else {
-                LOG_WARN("MaiDump LoadExec: found mai_moe/mai.suprx but failed to preload it before '{}'.",
-                    launch_request.self_path);
-            }
-        }
-    }
-
     // Load main executable
     if (!launch_request.self_path.empty()) {
         emuenv.self_path = launch_request.self_path;
