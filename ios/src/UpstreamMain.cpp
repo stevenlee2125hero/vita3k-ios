@@ -2817,21 +2817,6 @@ int main(int argc, char *argv[]) {
     if (session_settings)
         apply_game_session_settings(*emuenv, *session_settings);
 
-    // Golden Abyss performs CPU/GPU surface round-trips and is known to need
-    // Vita3K's accurate synchronization path.  The iOS frontend inherited the
-    // speed-oriented defaults (high accuracy off, surface sync disabled),
-    // which can present stale render-target memory as textures on MoltenVK and
-    // produces the severe striped/black corruption seen in PCSD00001.
-    // Keep this compatibility override session-local and title-specific.
-    if (g_current_title_id == "PCSD00001") {
-        emuenv->cfg.current_config.high_accuracy = true;
-        emuenv->cfg.current_config.disable_surface_sync = false;
-        emuenv->cfg.current_config.async_pipeline_compilation = false;
-        emuenv->cfg.current_config.resolution_multiplier = 1.0f;
-        emuenv->cfg.current_config.anisotropic_filtering = 1;
-        LOG_INFO("PCSD00001 graphics compatibility: high_accuracy=1 surface_sync=1 async_pipeline=0 resolution=1x aniso=1x");
-    }
-
     IOSFrameHost frame_host(window);
 
     // A failed launch (bad renderer init, encrypted/undecryptable content, a
