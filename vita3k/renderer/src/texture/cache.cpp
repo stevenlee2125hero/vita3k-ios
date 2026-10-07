@@ -385,8 +385,13 @@ void TextureCache::upload_texture(const SceGxmTexture &gxm_texture, MemState &me
 
     uint32_t layout_width;
     uint32_t layout_height;
-    if (gxm_texture.mip_count == 0xF && texture_type == SCE_GXM_TEXTURE_LINEAR) {
-        // a mipcount of 0xF means no mips, so for cube and planes, they follow each other directly without padding
+    if ((gxm_texture.mip_count == 0xF && texture_type == SCE_GXM_TEXTURE_LINEAR)
+        || texture_type == SCE_GXM_TEXTURE_TILED) {
+        // Linear textures without mips are tightly packed. Tiled textures are
+        // padded per mip to 32x32 tiles; unlike swizzled textures their mip
+        // storage must not be rounded to the next power of two. Doing that
+        // advances the source pointer too far and makes later mips read the
+        // wrong texels (visible as repeated/striped corruption).
         layout_width = width;
         layout_height = height;
     } else {
