@@ -1590,7 +1590,47 @@ void vita3k_ios_share_log_file() {
         });
         return;
     }
-    vita3k_ios_share_file(g_log_file_path);
+
+    // Validate the concrete file before constructing UIActivityViewController.
+    // A stale/non-existent URL can make the share action appear to do nothing
+    // on iOS.  Flush the Vita3K logger first so the latest crash/session lines
+    // are visible to Files/AirDrop immediately.
+    if (auto logger = spdlog::default_logger())
+        logger->flush();
+
+    NSString *filePath = [NSString stringWithUTF8String:g_log_file_path.c_str()];
+    perform_on_main(^{
+        BOOL isDirectory = NO;
+        if (filePath.length == 0
+            || ![[NSFileManager defaultManager] fileExistsAtPath:filePath
+                                                      isDirectory:&isDirectory]
+            || isDirectory) {
+            present_alert(@"Log file unavailable",
+                [NSString stringWithFormat:@"Tsubomi could not find the log at:\\n%@", filePath ?: @"(empty path)"]);
+            return;
+        }
+
+        NSURL *url = [NSURL fileURLWithPath:filePath isDirectory:NO];
+        UIActivityViewController *share =
+            [[UIActivityViewController alloc] initWithActivityItems:@[url]
+                                              applicationActivities:nil];
+
+        // Settings is itself presented as a sheet. Presenting another sheet
+        // from the root controller waits forever for Settings to disappear,
+        // which made Share log file look like a dead button. Present from the
+        // currently visible controller instead.
+        UIViewController *presenter = document_picker_presenter();
+        if (!presenter) {
+            present_alert(@"Unable to share log",
+                @"Tsubomi could not find an active screen to present the share sheet.");
+            return;
+        }
+        share.popoverPresentationController.sourceView = presenter.view;
+        share.popoverPresentationController.sourceRect =
+            CGRectMake(CGRectGetMidX(presenter.view.bounds),
+                CGRectGetMidY(presenter.view.bounds), 1, 1);
+        [presenter presentViewController:share animated:YES completion:nil];
+    });
 }
 
 void vita3k_ios_request_current_trophies() {
