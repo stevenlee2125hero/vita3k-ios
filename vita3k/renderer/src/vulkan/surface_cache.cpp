@@ -236,6 +236,65 @@ void VKSurfaceCache::cleanup() {
     cpu_surfaces_changed.clear();
     target = nullptr;
     last_written_surface = nullptr;
+#ifdef VITA3K_PLATFORM_IOS
+    color_lookup_counts.fill(0);
+    color_lookup_last_frame.fill(0);
+#endif
+}
+
+void VKSurfaceCache::trace_color_lookup(ColorLookupPath path, const SceGxmTexture &texture,
+    SceGxmColorBaseFormat format, const ColorSurfaceCacheInfo *surface) {
+#ifdef VITA3K_PLATFORM_IOS
+    static constexpr std::array names{
+        "no-surface", "dirty", "rgb-mismatch", "tiling-stride", "range", "pixel-size",
+        "outside", "partial-typeless", "viewport", "feedback-viewport", "direct-view",
+        "copy", "typeless-copy", "cached-copy"
+    };
+    static_assert(names.size() == static_cast<size_t>(ColorLookupPath::Count));
+    const size_t index = static_cast<size_t>(path);
+    const auto *context = static_cast<VKContext *>(state.context);
+    const uint64_t frame = context->frame_timestamp;
+    const uint64_t count = ++color_lookup_counts[index];
+    // Keep sampling every path throughout gameplay, not just during boot.
+    if (count > 4 && frame - color_lookup_last_frame[index] < 300)
+        return;
+    color_lookup_last_frame[index] = frame;
+
+    const uint32_t width = gxm::get_width(texture);
+    const uint32_t height = gxm::get_height(texture);
+    const auto type = texture.texture_type();
+    uint32_t pixel_stride = width;
+    if (type == SCE_GXM_TEXTURE_LINEAR)
+        pixel_stride = align(width, 8);
+    else if (type == SCE_GXM_TEXTURE_TILED)
+        pixel_stride = align(width, 32);
+    else if (type == SCE_GXM_TEXTURE_SWIZZLED_ARBITRARY)
+        pixel_stride = next_power_of_two(width);
+    const uint32_t guest_bpp = static_cast<uint32_t>(gxm::bits_per_pixel(format) / 8);
+    const uint32_t stride = type == SCE_GXM_TEXTURE_LINEAR_STRIDED
+        ? gxm::get_stride_in_bytes(texture) : pixel_stride * guest_bpp;
+    const vk::Format requested_format = color::translate_format(format);
+    LOG_INFO("iOS RT lookup path={} count={} frame={} scene={} addr=0x{:08X} req={}x{} type=0x{:08X} "
+             "guest_fmt=0x{:08X} vk_fmt={} guest_Bpp={} host_Bpp={} stride={} gamma={} mip={} scale={}",
+        names[index], count, frame, context->scene_timestamp, texture.data_addr << 2, width, height,
+        static_cast<uint32_t>(type), static_cast<uint32_t>(format), vk::to_string(requested_format),
+        guest_bpp, vk::blockSize(requested_format), stride, static_cast<uint32_t>(texture.gamma_mode),
+        texture.true_mip_count(), state.res_multiplier);
+    if (surface) {
+        LOG_INFO("iOS RT source path={} frame={} addr=0x{:08X} delta=0x{:X} guest={}x{} host={}x{} "
+                 "guest_fmt=0x{:08X} vk_fmt={} guest_Bpp={} host_Bpp={} stride={} bytes={} tiling={} "
+                 "layout={} dirty={} last_rendered={} current_attachment={}",
+            names[index], frame, surface->data.address(), (texture.data_addr << 2) - surface->data.address(),
+            surface->original_width, surface->original_height, surface->width, surface->height,
+            static_cast<uint32_t>(surface->format), vk::to_string(surface->texture.format),
+            gxm::bits_per_pixel(surface->format) / 8, vk::blockSize(surface->texture.format),
+            surface->stride_bytes, surface->total_bytes, static_cast<int>(surface->tiling),
+            vk::to_string(vkutil::get_underlying_layout(surface->texture.layout)), *surface->dirty,
+            surface->last_frame_rendered,
+            context->current_color_view == surface->texture.view
+                || (surface->alternate_view && context->current_color_view == surface->alternate_view));
+    }
+#endif
 }
 
 SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(MemState &mem, SceGxmColorSurface *color) {
@@ -481,12 +540,15 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
 
     overlap = (overlap && (ite->first + ite->second->total_bytes) > address);
 
-    if (!overlap)
+    if (!overlap) {
+        trace_color_lookup(ColorLookupPath::NoSurface, texture, base_format, nullptr);
         return std::nullopt;
+    }
 
     if (*ite->second->dirty) {
         // Guest wrote to the surface backing memory since it was rendered, so GPU data is stale.
         LOG_WARN_ONCE("Surface-as-texture miss (dirty): texture=0x{:X} surface=0x{:X}", address, ite->first);
+        trace_color_lookup(ColorLookupPath::Dirty, texture, base_format, ite->second);
         return std::nullopt;
     }
 
@@ -532,33 +594,19 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
 
     ColorSurfaceCacheInfo &info = *ite->second;
 
-#ifdef VITA3K_PLATFORM_IOS
-    // Diagnostic only: characterize Golden Abyss render-target reuse without
-    // changing GPU synchronization or introducing CPU readback stalls.
-    // Limit output to the first 120 samples to keep on-device logs bounded.
-    static uint32_t rt_lookup_samples = 0;
-    if (rt_lookup_samples < 120) {
-        ++rt_lookup_samples;
-        LOG_INFO("iOS RT texture lookup #{} addr=0x{:08X} surface=0x{:08X} requested={}x{} stored={}x{} "
-                 "format={}/{} tiling={}/{} stride={}/{} dirty={} last_rendered={}",
-            rt_lookup_samples, address, ite->first, original_width, original_height,
-            info.original_width, info.original_height, static_cast<int>(base_format),
-            static_cast<int>(info.format), static_cast<int>(tiling),
-            static_cast<int>(info.tiling), stride_bytes, info.stride_bytes,
-            static_cast<int>(*info.dirty), info.last_frame_rendered);
-    }
-#endif
-
     if ((base_format == SCE_GXM_COLOR_BASE_FORMAT_U8U8U8 || info.format == SCE_GXM_COLOR_BASE_FORMAT_U8U8U8)
-        && base_format != info.format)
+        && base_format != info.format) {
         // don't even try to match u8u8u8 with something else
+        trace_color_lookup(ColorLookupPath::RgbMismatch, texture, base_format, &info);
         return std::nullopt;
+    }
 
     if (tiling != info.tiling || info.stride_bytes != stride_bytes) {
         // if the tiling is different, also don't try to match them
         // about the strides, I've yet to see a case where the byte stride is different
         LOG_WARN_ONCE("Surface-as-texture miss (tiling/stride): texture=0x{:X} tiling={}/{} stride={}/{}",
             address, static_cast<int>(tiling), static_cast<int>(info.tiling), stride_bytes, info.stride_bytes);
+        trace_color_lookup(ColorLookupPath::TilingStride, texture, base_format, &info);
         return std::nullopt;
     }
 
@@ -570,14 +618,17 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         // the texture start at the same location should be enough
         LOG_WARN_ONCE("Surface-as-texture miss (range): texture=0x{:X}+0x{:X} surface=0x{:X}+0x{:X}",
             address, total_surface_size, ite->first, info.total_bytes);
+        trace_color_lookup(ColorLookupPath::Range, texture, base_format, &info);
         return std::nullopt;
     }
 
     uint32_t bytes_per_pixel_requested = gxm::bits_per_pixel(base_format) / 8;
     uint32_t bytes_per_pixel_in_store = gxm::bits_per_pixel(info.format) / 8;
 
-    if (std::max(bytes_per_pixel_requested, bytes_per_pixel_in_store) % std::min(bytes_per_pixel_requested, bytes_per_pixel_in_store) != 0)
+    if (std::max(bytes_per_pixel_requested, bytes_per_pixel_in_store) % std::min(bytes_per_pixel_requested, bytes_per_pixel_in_store) != 0) {
+        trace_color_lookup(ColorLookupPath::PixelSize, texture, base_format, &info);
         return std::nullopt;
+    }
 
     // TODO: this is true only for linear textures (and also kind of for tiled textures) (and in this case start_x = 0),
     // for swizzled textures this is different
@@ -595,13 +646,17 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     // No valid GPU-rendered texels overlap the requested texture. Falling
     // back to the normal texture cache is safer than issuing an out-of-bounds
     // Vulkan copy.
-    if (start_x >= info.width || start_sourced_line >= info.height)
+    if (start_x >= info.width || start_sourced_line >= info.height) {
+        trace_color_lookup(ColorLookupPath::Outside, texture, base_format, &info);
         return std::nullopt;
+    }
 
     // The typeless conversion path uses a row-strided transition buffer and
     // cannot safely synthesize texels outside the cached surface.
-    if (partial_surface && bytes_per_pixel_requested != bytes_per_pixel_in_store)
+    if (partial_surface && bytes_per_pixel_requested != bytes_per_pixel_in_store) {
+        trace_color_lookup(ColorLookupPath::PartialTypeless, texture, base_format, &info);
         return std::nullopt;
+    }
 
     // We should be able to use this texture, so set it as mru
     color_surface_queue.set_as_mru(&info);
@@ -609,16 +664,11 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     const vk::ImageView color_handle_view = reinterpret_cast<VKContext *>(state.context)->current_color_view;
     const bool is_same_image = (color_handle_view == info.texture.view) || (color_handle_view == info.alternate_view);
 
-    // iOS/MoltenVK: do not force tiled or F16 render targets through the
-    // generic cast/copy path. Golden Abyss uses guest tiling metadata for
-    // surfaces that are already represented by a normal Vulkan image; copying
-    // those images as if tiling described the host image layout corrupts UI
-    // render targets into dense horizontal/vertical stripes. F16 is also part
-    // of the title's HDR chain, where an unnecessary cast copy can destroy the
-    // values later consumed by tone mapping. Keep the upstream texture-view
-    // path when format-compatible and reserve the copy path for the real
-    // alias/crop/typeless hazards below.
+    // Guest tiling describes the memory address mapping, not the host image
+    // layout. Format-compatible surfaces can use a sampled view directly.
     if (state.features.use_texture_viewport && base_format == info.format) {
+        trace_color_lookup(is_same_image ? ColorLookupPath::FeedbackViewport : ColorLookupPath::Viewport,
+            texture, base_format, &info);
         // use a texture viewport
         *texture_viewport = {
             .ratio = {
@@ -660,6 +710,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
 
                 if (casted->scene_timestamp == scene_timestamp) {
                     // already copied for this scene, don't do it again
+                    trace_color_lookup(ColorLookupPath::CachedCopy, texture, base_format, &info);
                     return TextureLookupResult{
                         casted->texture.view,
                         casted->texture.layout,
@@ -711,13 +762,36 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
 
         casted->scene_timestamp = scene_timestamp;
 
+        // The source was written by an earlier render pass (or clear/copy).
+        // GENERAL is a layout, not a memory dependency on those writes.
+        const vk::ImageMemoryBarrier source_barrier{
+            .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderWrite | vk::AccessFlagBits::eTransferWrite,
+            .dstAccessMask = vk::AccessFlagBits::eTransferRead,
+            .oldLayout = vk::ImageLayout::eGeneral,
+            .newLayout = vk::ImageLayout::eGeneral,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = info.texture.image,
+            .subresourceRange = vkutil::color_subresource_range
+        };
+        cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader | vk::PipelineStageFlagBits::eTransfer,
+            vk::PipelineStageFlagBits::eTransfer, {}, {}, {}, source_barrier);
+
         if (partial_surface) {
             const vk::ClearColorValue clear_color{ std::array<float, 4>({ 0.0f, 0.0f, 0.0f, 0.0f }) };
             cmd_buffer.clearColorImage(casted->texture.image, vk::ImageLayout::eTransferDstOptimal,
                 clear_color, vkutil::color_subresource_range);
+            // Order the clear before the copy overwrites the overlapping texels.
+            const vk::MemoryBarrier clear_barrier{
+                .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+                .dstAccessMask = vk::AccessFlagBits::eTransferWrite
+            };
+            cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                vk::PipelineStageFlagBits::eTransfer, {}, clear_barrier, {}, {});
         }
 
         if (bytes_per_pixel_requested == bytes_per_pixel_in_store) {
+            trace_color_lookup(ColorLookupPath::Copy, texture, base_format, &info);
             const uint32_t copy_width = std::min(width, info.width - start_x);
             const uint32_t copy_height = std::min(height, info.height - start_sourced_line);
             vk::ImageCopy image_copy{
@@ -736,6 +810,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             cmd_buffer.copyImage(info.texture.image, vk::ImageLayout::eGeneral, casted->texture.image, vk::ImageLayout::eTransferDstOptimal, image_copy);
         } else {
             LOG_INFO_ONCE("Game is doing typeless copies");
+            trace_color_lookup(ColorLookupPath::TypelessCopy, texture, base_format, &info);
             // We must use a transition buffer
             vk::DeviceSize buffer_size = stride_bytes * static_cast<size_t>(state.res_multiplier * align(height, 4)) + start_x * bytes_per_pixel_requested;
             if (!casted->transition_buffer.buffer || casted->transition_buffer.size < buffer_size) {
@@ -759,6 +834,18 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             };
             cmd_buffer.copyImageToBuffer(info.texture.image, vk::ImageLayout::eGeneral, casted->transition_buffer.buffer, copy_image_buffer);
 
+            const vk::BufferMemoryBarrier buffer_barrier{
+                .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+                .dstAccessMask = vk::AccessFlagBits::eTransferRead,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .buffer = casted->transition_buffer.buffer,
+                .offset = 0,
+                .size = VK_WHOLE_SIZE
+            };
+            cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                vk::PipelineStageFlagBits::eTransfer, {}, {}, buffer_barrier, {});
+
             // then the buffer to the image
             const uint32_t dst_pixel_stride = (stride_bytes / bytes_per_pixel_requested) * state.res_multiplier;
             copy_image_buffer
@@ -768,7 +855,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
                 .setImageExtent({ width, height, 1 });
             cmd_buffer.copyBufferToImage(casted->transition_buffer.buffer, casted->texture.image, vk::ImageLayout::eTransferDstOptimal, copy_image_buffer);
         }
-        casted->texture.transition_to(cmd_buffer, vkutil::ImageLayout::ColorAttachmentReadWrite);
+        casted->texture.transition_to(cmd_buffer, vkutil::ImageLayout::SampledImage);
 
         return TextureLookupResult{
             casted->texture.view,
@@ -777,6 +864,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         };
     } else {
         // the renderpass external dependencies should take care of the barrier
+        trace_color_lookup(ColorLookupPath::DirectView, texture, base_format, &info);
         if (swizzle == info.swizzle && vk_format == info.texture.format)
             // we can use the same texture view
             return TextureLookupResult{

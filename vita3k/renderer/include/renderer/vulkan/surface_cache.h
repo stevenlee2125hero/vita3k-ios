@@ -23,6 +23,7 @@
 #include <util/containers.h>
 #include <vkutil/objects.h>
 
+#include <array>
 #include <optional>
 
 struct SwsContext;
@@ -169,6 +170,30 @@ struct SurfaceRetrieveResult {
 class VKSurfaceCache {
 private:
     VKState &state;
+
+    enum class ColorLookupPath {
+        NoSurface,
+        Dirty,
+        RgbMismatch,
+        TilingStride,
+        Range,
+        PixelSize,
+        Outside,
+        PartialTypeless,
+        Viewport,
+        FeedbackViewport,
+        DirectView,
+        Copy,
+        TypelessCopy,
+        CachedCopy,
+        Count
+    };
+#ifdef VITA3K_PLATFORM_IOS
+    std::array<uint64_t, static_cast<size_t>(ColorLookupPath::Count)> color_lookup_counts{};
+    std::array<uint64_t, static_cast<size_t>(ColorLookupPath::Count)> color_lookup_last_frame{};
+#endif
+    void trace_color_lookup(ColorLookupPath path, const SceGxmTexture &texture,
+        SceGxmColorBaseFormat format, const ColorSurfaceCacheInfo *surface);
 
     // only have 20 color surfaces and 20 depth surfaces allocated at most at a given time
     static constexpr uint32_t max_surfaces_allowed = 20;
