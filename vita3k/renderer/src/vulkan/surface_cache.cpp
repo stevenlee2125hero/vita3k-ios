@@ -592,11 +592,23 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     const vk::ImageView color_handle_view = reinterpret_cast<VKContext *>(state.context)->current_color_view;
     const bool is_same_image = (color_handle_view == info.texture.view) || (color_handle_view == info.alternate_view);
 
-    // Desktop parity: the same texture-viewport path desktop uses, for full
-    // and partial surfaces alike. (Both the custom clear-and-copy detour and
-    // a casted-copy-for-partials attempt rendered worse on device than the
-    // stock path; deviating from upstream here has never improved anything.)
-    if (state.features.use_texture_viewport && base_format == info.format) {
+    // MoltenVK/iOS: sampling a tiled/F16 render target directly through the
+    // texture-viewport fast path can expose the attachment before Metal has
+    // made the render-target writes visible to a texture read.  Golden Abyss
+    // uses these surfaces heavily for its HDR/post-processing chain; the bad
+    // alias shows up as a thin striped band with the rest of the scene black.
+    // Force those surfaces through the existing cast/copy path instead.  This
+    // is GPU->GPU (no CPU surface sync/fence), so it avoids the iOS deadlock
+    // seen when full Surface Sync was enabled while still establishing a real
+    // transfer dependency before the surface is sampled.
+    const bool ios_force_rt_copy =
+#ifdef VITA3K_PLATFORM_IOS
+        info.tiling != SurfaceTiling::Linear
+        || info.format == SCE_GXM_COLOR_BASE_FORMAT_F16F16F16F16;
+#else
+        false;
+#endif
+    if (state.features.use_texture_viewport && base_format == info.format && !ios_force_rt_copy) {
         // use a texture viewport
         *texture_viewport = {
             .ratio = {
@@ -624,7 +636,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         };
     }
 
-    if (is_same_image || (start_sourced_line != 0) || (start_x != 0) || (info.width != width) || (info.height != height) || (info.format != base_format)) {
+    if (ios_force_rt_copy || is_same_image || (start_sourced_line != 0) || (start_x != 0) || (info.width != width) || (info.height != height) || (info.format != base_format)) {
         const uint64_t scene_timestamp = reinterpret_cast<VKContext *>(state.context)->scene_timestamp;
 
         std::vector<CastedTexture> &casted_vec = info.casted_textures;
