@@ -2782,8 +2782,11 @@ int main(int argc, char *argv[]) {
     // library instead of leaving a dead process behind (the old "freeze").
     bool app_terminating = false;
     bool jit_pool_prewarmed = g_jit_pool_ready.load(std::memory_order_relaxed);
+    std::optional<AppLaunchRequest> pending_relaunch;
     while (!app_terminating) {
-    auto launch_request = choose_boot_title(*emuenv);
+    auto launch_request = pending_relaunch
+        ? std::exchange(pending_relaunch, std::nullopt)
+        : choose_boot_title(*emuenv);
     if (!launch_request)
         break;
 
@@ -3079,8 +3082,13 @@ int main(int argc, char *argv[]) {
         }
 
         if (auto request = emuenv->take_app_launch_request()) {
-            // In-process relaunch (LoadExec) is not supported yet on iOS.
-            LOG_WARN("Title requested relaunch of '{}'; stopping instead.", request->self_path);
+            // sceAppMgrLoadExec asks the frontend to replace the current
+            // process image (for example Golden Abyss' small eboot.bin launcher
+            // hands off to app0:uncharted.self). Reuse the normal session
+            // teardown/startup path instead of dropping back to the library.
+            LOG_INFO("Title requested LoadExec relaunch: app='{}' self='{}'",
+                request->app_path, request->self_path);
+            pending_relaunch = std::move(*request);
             running = false;
         }
 
@@ -3100,7 +3108,8 @@ int main(int argc, char *argv[]) {
     vita3k_ios_hide_virtual_controller();
     session_controller.stop(app_terminating
             ? app::AppSessionStopReason::FrontendShutdown
-            : app::AppSessionStopReason::UserRequest);
+            : (pending_relaunch ? app::AppSessionStopReason::Relaunch
+                                : app::AppSessionStopReason::UserRequest));
     if (has_virtual_controller)
         vita3k_ios_detach_virtual_controller();
 
@@ -3110,7 +3119,10 @@ int main(int argc, char *argv[]) {
     emuenv->audio.audio_backend.clear();
     restore_global_config();
 
-    LOG_INFO("Returning to game library");
+    if (pending_relaunch)
+        LOG_INFO("Restarting current title via LoadExec: self='{}'", pending_relaunch->self_path);
+    else
+        LOG_INFO("Returning to game library");
     } // while (!app_terminating)
 
     SDL_DestroyWindow(window);
