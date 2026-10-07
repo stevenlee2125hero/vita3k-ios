@@ -517,7 +517,19 @@ EXPORT(SceInt32, sceAppUtilSystemParamGetInt, SceSystemParamId paramId, SceInt32
 
     switch (paramId) {
     case SCE_SYSTEM_PARAM_ID_LANG:
-        *value = (SceSystemParamLang)emuenv.cfg.sys_lang;
+        // PCSD00001 (Uncharted: Golden Abyss Asia) contains a Traditional
+        // Chinese resource set under the game's "ch" locale.  The iOS
+        // frontend currently has no system-language selector and therefore
+        // keeps Vita3K's English-US default.  Report the Vita Traditional
+        // Chinese system language for this title so the game can select the
+        // resources already present in gamedata.bin.  Keep every other title
+        // on the configured system language.
+        if (emuenv.io.title_id == "PCSD00001") {
+            *value = SCE_SYSTEM_PARAM_LANG_CHINESE_T;
+            LOG_INFO("PCSD00001 language override: reporting Vita Traditional Chinese ({})", *value);
+        } else {
+            *value = (SceSystemParamLang)emuenv.cfg.sys_lang;
+        }
         return 0;
     case SCE_SYSTEM_PARAM_ID_ENTER_BUTTON:
         *value = (SceSystemParamEnterButtonAssign)emuenv.cfg.sys_button;
