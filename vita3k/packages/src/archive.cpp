@@ -172,7 +172,7 @@ struct ArchiveInstallMapping {
 };
 
 bool detect_legacy_vita_tree_mapping(std::string_view name, ArchiveInstallMapping &mapping) {
-    static constexpr std::array<std::pair<std::string_view, std::string_view>, 7> roots = {{
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 7> roots = { {
         { "app", "ux0/app" },
         { "patch", "ux0/patch" },
         { "addcont", "ux0/addcont" },
@@ -180,7 +180,7 @@ bool detect_legacy_vita_tree_mapping(std::string_view name, ArchiveInstallMappin
         { "repatch", "ux0/rePatch" },
         { "license", "ux0/license" },
         { "lisense", "ux0/license" },
-    }};
+    } };
 
     std::size_t segment_start = 0;
     while (segment_start < name.size()) {
@@ -364,8 +364,7 @@ ArchiveInstallResult install_archive_transactionally(const std::filesystem::path
             continue;
         const auto base_path = vfs_root / "ux0/app" / application.title_id;
         const bool base_exists = std::filesystem::exists(base_path);
-        const bool legacy_full_dump =
-            archive_has_relative_file(zip, application.content_root, "mai_moe/load_type.mai")
+        const bool legacy_full_dump = archive_has_relative_file(zip, application.content_root, "mai_moe/load_type.mai")
             || archive_has_relative_file(zip, application.content_root, "mai_moe/mai.suprx");
         if (!base_exists && legacy_full_dump) {
             LOG_WARN("Archive install: treating legacy Mai full dump {} as base application", application.title_id);
