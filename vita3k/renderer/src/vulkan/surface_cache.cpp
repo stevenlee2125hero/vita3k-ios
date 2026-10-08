@@ -838,9 +838,16 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             // image.  Allocate from the actual source row pitch rather than
             // assuming the guest format has the same Vulkan byte footprint.
             // The additional alignment rows are retained for existing callers.
-            const vk::DeviceSize buffer_size =
-                static_cast<vk::DeviceSize>(info.stride_bytes) * state.res_multiplier * align(height, 4)
-                + static_cast<vk::DeviceSize>(start_x) * bytes_per_pixel_requested;
+            // The staging buffer is interpreted twice: first using the
+            // source Vulkan format/row pitch, then using the requested format
+            // and destination row pitch. Either view can require more bytes.
+            // Account for both before issuing the Vulkan copy commands.
+            const vk::DeviceSize source_row_bytes = static_cast<vk::DeviceSize>(info.stride_bytes) * state.res_multiplier;
+            const vk::DeviceSize destination_row_bytes = static_cast<vk::DeviceSize>(stride_bytes) * state.res_multiplier;
+            const vk::DeviceSize destination_offset = static_cast<vk::DeviceSize>(start_x) * bytes_per_pixel_requested;
+            const vk::DeviceSize source_span = source_row_bytes * align(height, 4);
+            const vk::DeviceSize destination_span = destination_row_bytes * align(height, 4) + destination_offset;
+            const vk::DeviceSize buffer_size = std::max(source_span, destination_span);
             if (!casted->transition_buffer.buffer || casted->transition_buffer.size < buffer_size) {
                 // create or re-create the buffer
                 state.frame().destroy_queue.add_buffer(casted->transition_buffer);
