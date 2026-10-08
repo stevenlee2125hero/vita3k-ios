@@ -870,13 +870,12 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             // Limit per-frame spam on iPhone; repeated render-target casts can
             // otherwise overwhelm logging and stall the game.
             static uint32_t ios_typeless_diagnostic_count = 0;
-            if (ios_typeless_diagnostic_count++ < 64)
-                LOG_INFO("iOS typeless surface cast addr=0x{:X} source={}x{} guest={}B host={}B vk={} destination={}x{} guest={}B host={}B vk={} offset={},{} row_src={} row_dst={} alias={}",
-                address, info.width, info.height, bytes_per_pixel_in_store,
-                vk::blockSize(info.texture.format), vk::to_string(info.texture.format),
-                width, height, bytes_per_pixel_requested, vk::blockSize(vk_format),
-                vk::to_string(vk_format), start_x, start_sourced_line,
-                info.stride_bytes, stride_bytes, byte_equivalent_linear_alias);
+            if (ios_typeless_diagnostic_count++ < 64) {
+                LOG_INFO("iOS typeless cast address=0x{:X}", address);
+                LOG_INFO("iOS typeless source {}x{} guest={} host={}", info.width, info.height, bytes_per_pixel_in_store, vk::blockSize(info.texture.format));
+                LOG_INFO("iOS typeless destination {}x{} guest={} host={}", width, height, bytes_per_pixel_requested, vk::blockSize(vk_format));
+                LOG_INFO("iOS typeless offset={},{} row_src={} row_dst={} alias={}", start_x, start_sourced_line, info.stride_bytes, stride_bytes, byte_equivalent_linear_alias);
+            }
 #endif
             trace_color_lookup(ColorLookupPath::TypelessCopy, texture, base_format, &info);
             // We must use a transition buffer
