@@ -902,7 +902,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             // then the buffer to the image
             const uint32_t dst_pixel_stride = (stride_bytes / bytes_per_pixel_requested) * state.res_multiplier;
             copy_image_buffer
-                .setBufferOffset(start_x * bytes_per_pixel_requested)
+                .setBufferOffset(destination_offset)
                 .setBufferRowLength(dst_pixel_stride)
                 .setImageOffset({ 0, 0, 0 })
                 .setImageExtent({ width, height, 1 });
