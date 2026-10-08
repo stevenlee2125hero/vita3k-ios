@@ -589,7 +589,10 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         }
         stride_bytes = pixel_stride * gxm::bits_per_pixel(base_format) / 8;
     }
-    uint32_t total_surface_size = stride_bytes * original_height;
+    // A guest-provided row pitch can overflow a 32-bit multiplication.
+    // Keep the requested range in 64 bits so it cannot alias an unrelated
+    // cached render target after wraparound.
+    const uint64_t total_surface_size = static_cast<uint64_t>(stride_bytes) * original_height;
 
     ColorSurfaceCacheInfo &info = *ite->second;
 
