@@ -148,6 +148,9 @@ void set_context(VKContext &context, MemState &mem, VKRenderTarget *rt, const Fe
         context.record.is_gamma_corrected = false;
         context.record.is_maskupdate = false;
         context.record.color_base_format = SCE_GXM_COLOR_BASE_FORMAT_U8U8U8U8;
+        // Shader hints and blend selection must describe the same transient
+        // RGBA8 attachment as the render pass, not a stale guest RG32 surface.
+        context.record.color_surface.colorFormat = SCE_GXM_COLOR_FORMAT_U8U8U8U8_ABGR;
     }
     context.current_color_format = vk_format;
 

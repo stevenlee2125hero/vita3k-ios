@@ -20,6 +20,9 @@ mask_guard = s[mask_guard_start:s.index(';', mask_guard_start)+1]
 r = (root / 'vita3k/renderer/src/vulkan/renderer.cpp').read_text()
 crop_start = r.index('    if (game_id == "PCSD00001")')
 crop = r[crop_start:r.index('\n#endif', crop_start)]
+c = (root / 'vita3k/renderer/src/vulkan/context.cpp').read_text()
+fallback_start = c.index('    if (color_surface_fin->data.address() == 0)')
+fallback = c[fallback_start:c.index('\n    context.current_color_format', fallback_start)]
 code = r'''
 #include <vector>
 #include <cstdint>
@@ -47,6 +50,25 @@ struct Builder {
 }
 enum class SceGxmProgramType{Vertex,Fragment};
 constexpr uint32_t SCE_GXM_COLOR_BASE_FORMAT_F32F32=11;
+constexpr uint32_t SCE_GXM_COLOR_BASE_FORMAT_U8U8U8U8=3;
+constexpr uint32_t SCE_GXM_COLOR_FORMAT_U8U8U8U8_ABGR=3;
+namespace vk {enum class Format{eR8G8B8A8Unorm,eR32G32Uint};}
+struct Address {uint32_t value;uint32_t address()const{return value;}};
+struct Surface {Address data{};uint32_t colorFormat=11;bool downscale=false;};
+struct Record {Surface color_surface;bool is_gamma_corrected=true,is_maskupdate=true;uint32_t color_base_format=11;};
+struct Context {Record record;};
+struct Target {bool multisample_mode=true;};
+void check_transient_fallback(){
+ Context context;Target target;auto rt=&target;
+ auto color_surface_fin=&context.record.color_surface;
+ auto vk_format=vk::Format::eR32G32Uint;
+'''+fallback+r'''
+ assert(color_surface_fin==nullptr);
+ assert(vk_format==vk::Format::eR8G8B8A8Unorm);
+ assert(context.record.color_surface.colorFormat==SCE_GXM_COLOR_FORMAT_U8U8U8U8_ABGR);
+ assert(context.record.color_base_format==SCE_GXM_COLOR_BASE_FORMAT_U8U8U8U8);
+ assert(!context.record.is_gamma_corrected && !context.record.is_maskupdate);
+}
 constexpr int FRAG_UNIFORM_writing_mask=0;
 namespace gxm {uint32_t get_base_format(uint32_t f){return f;}}
 namespace utils {spv::Id create_access_chain(spv::Builder&,int,spv::Id,std::initializer_list<spv::Id>){return 1;}}
@@ -79,6 +101,7 @@ void filter(Shader &shader){
 '''+body+r'''
 }
 int main(){
+ check_transient_fallback();
  Features golden,other;exact_crop(golden,"PCSD00001");exact_crop(other,"PCSE00551");
  assert(!golden.use_texture_viewport && other.use_texture_viewport);
  std::vector<SceGxmVertexAttribute> attrs{{0,0,0,3,0}};
