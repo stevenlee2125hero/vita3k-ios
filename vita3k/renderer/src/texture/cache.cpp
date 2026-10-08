@@ -496,11 +496,15 @@ void TextureCache::upload_texture(const SceGxmTexture &gxm_texture, MemState &me
             pixels = texture_data_decompressed.data();
             break;
         case SCE_GXM_TEXTURE_BASE_FORMAT_U2F10F10F10:
-            // don't change what openGL is doing (which is completely wrong)
-            if (!is_vulkan || support_a2rgb10) {
-                LOG_INFO_ONCE("Your device support SCE_GXM_TEXTURE_BASE_FORMAT_U2F10F10F10");
+            // A2R10G10B10 is an integer UNORM format, not Vita's unsigned
+            // floating-point F10 encoding. Vulkan always stores this guest
+            // format as RGBA16F, so upload converted 8-byte host texels even
+            // when native integer 10-bit textures are supported.
+            // Preserve the existing OpenGL path here.
+            if (!is_vulkan)
                 break;
-            }
+            LOG_INFO_ONCE("Vulkan U2F10 upload: converting packed 4-byte guest texels to 8-byte RGBA16F (integer A2RGB10={} format=0x{:08X})",
+                support_a2rgb10, static_cast<uint32_t>(fmt));
             texture_data_decompressed.resize(pixels_per_stride * memory_height * 8);
             convert_u2f10f10f10_to_f16f16f16f16(texture_data_decompressed.data(), pixels, pixels_per_stride, memory_height, fmt);
             pixels = texture_data_decompressed.data();

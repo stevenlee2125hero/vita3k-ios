@@ -68,3 +68,33 @@ recording GPU stubs and checks slot reuse, null/stale view rejection, deferred
 resource retirement and six RGB staging sizes under ASan/UBSan. These are host
 logic tests; they do not execute a Vulkan driver. The decoder tests still pass.
 Initial artifact is superseded; only the follow-up candidate should be tested.
+
+
+## Device rejection and packed-float upload defect
+
+The user tested 2dec3141 and reported no improvement. Screenshots show dense
+purple/cyan noise on the character while stone/vegetation and Chinese subtitles
+remain legible; a menu view is extensively corrupted. This rejects that candidate
+as a solution to the actual reported corruption, despite its passing host tests.
+
+A subsequent texture-source audit found a concrete guest/host footprint defect:
+`TextureCache::upload_texture` skipped U2F10F10F10 expansion when
+`support_a2rgb10` was true. That capability describes integer UNORM
+A2R10G10B10, not unsigned F10 floating-point components. Meanwhile Vulkan
+`texture::translate_format` always chooses RGBA16F for U2F10F10F10. Thus raw
+4-byte packed texels were uploaded with an 8-byte-per-texel Vulkan copy layout.
+The copy reads beyond the region actually populated for that mip, including
+neighboring/stale staging data. This is consistent with dense noise, but a
+screenshot alone does not establish the game's exact descriptor/capability path.
+
+Vulkan now always expands U2F10F10F10 into RGBA16F; OpenGL is unchanged.
+`check_u2f10_upload.py` compiles the production selection branch and conversion
+routine and checks both capability states and both alpha bit layouts with
+known half-float values. The previous candidate fails the capability=true case;
+the corrected branch passes 16 cases. An INFO-once marker records real use of
+this conversion in a device log. The former decoder/lifecycle suites still pass.
+
+This candidate needs a full upstream-core build and one device comparison.
+If corruption persists, collect the existing Share log file output from the same
+session; do not infer another root cause solely from screenshots. Packed-float
+surface aliases and same-pass feedback remain separate unverified paths.
