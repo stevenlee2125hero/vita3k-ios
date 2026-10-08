@@ -834,7 +834,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             // all preceding draws, including a closed macroblock render pass.
             SceGxmNotification empty_notification{};
             context->stop_recording(empty_notification, empty_notification, false);
-            context->current_render_pass = state.pipeline_cache.retrieve_render_pass(context->current_color_format, true, true, !context->record.color_surface.data);
+            context->current_render_pass = state.pipeline_cache.retrieve_render_pass(context->current_color_format, context->load_depth_on_resume, true, !context->record.color_surface.data);
             context->start_recording();
             context->scene_timestamp++;
         }

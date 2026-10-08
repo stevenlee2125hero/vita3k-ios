@@ -185,6 +185,7 @@ void set_context(VKContext &context, MemState &mem, VKRenderTarget *rt, const Fe
     force_store = true;
 #endif
     context.current_render_pass = context.state.pipeline_cache.retrieve_render_pass(vk_format, force_load, force_store, color_surface_fin == nullptr);
+    context.load_depth_on_resume = force_load;
     if (context.state.features.support_shader_interlock)
         // also retrieve / create the shader interlock pass
         context.current_shader_interlock_pass = context.state.pipeline_cache.retrieve_render_pass(vk_format, true, true, color_surface_fin == nullptr, true);
@@ -360,6 +361,7 @@ void VKContext::start_render_pass(bool create_descriptor_set) {
     curr_renderpass_info.setClearValues(curr_clear_values);
     render_cmd.beginRenderPass(curr_renderpass_info, vk::SubpassContents::eInline);
     has_rendered_in_recording = true;
+    load_depth_on_resume = true;
 
     // set the renderpass info ready in case we need to switch between classic and framebuffer fetch usage
     curr_renderpass_info.setClearValues(nullptr);
@@ -546,6 +548,17 @@ void VKContext::check_for_macroblock_change(bool is_draw) {
         // we changed the current macroblock, restart the renderpass
         last_macroblock_x = curr_macroblock_x;
         last_macroblock_y = curr_macroblock_y;
+
+#ifdef VITA3K_PLATFORM_IOS
+        if (!ignore_macroblock) {
+            // A fresh macroblock must still clear depth unless the guest
+            // requested loading it. Only a restart inside the same block
+            // resumes its previously stored values.
+            const auto &ds = record.depth_stencil_surface;
+            load_depth_on_resume = (ds.depth_data || ds.stencil_data) && ds.force_load;
+            current_render_pass = state.pipeline_cache.retrieve_render_pass(current_color_format, load_depth_on_resume, true, !record.color_surface.data);
+        }
+#endif
 
         if (in_renderpass) {
             if (state.features.use_texture_viewport) {

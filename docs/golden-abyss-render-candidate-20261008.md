@@ -139,6 +139,11 @@ including subsequent macroblocks. The iOS fallback depth image no longer has
 transient usage, preventing memoryless allocation from losing depth across
 snapshot splits. Other platforms retain their previous feedback/depth behavior.
 
+Follow-up self-audit: fresh macroblocks still clear depth according to the
+guest's load flag; only restarting an already rendered block loads its stored
+depth. A load_depth_on_resume flag carries that decision through a feedback
+command-buffer split, including when macroblock change already closed the pass.
+
 check_rt_alias_feedback.py extracts production alias admission, byte offset,
 viewport selection and feedback split code. It checks +0/+4 UNORM/sRGB/SNORM,
 rejects incompatible layouts/expanded formats, checks byte-distinct rows and

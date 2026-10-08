@@ -298,6 +298,7 @@ struct VKContext : public renderer::Context {
     bool is_recording = false;
     bool in_renderpass = false;
     bool has_rendered_in_recording = false;
+    bool load_depth_on_resume = false;
     bool refresh_pipeline = false;
     bool is_first_scene_draw = false;
     // command buffer used to record the current scene

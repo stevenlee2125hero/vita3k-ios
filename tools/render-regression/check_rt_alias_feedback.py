@@ -15,6 +15,9 @@ a = s.index('    bool can_use_viewport =')
 viewport = s[a:s.index('    if (can_use_viewport)', a)]
 a = s.index('            const vk::DeviceSize destination_offset =')
 offset = s[a:s.index(';', a) + 1]
+ctx_source = (root / 'vita3k/renderer/src/vulkan/context.cpp').read_text()
+a = ctx_source.index('        if (!ignore_macroblock) {\n            // A fresh macroblock')
+macroblock = ctx_source[a:ctx_source.index('\n#endif', a)]
 code = r'''
 #include <cassert>
 #include <cstdint>
@@ -31,18 +34,23 @@ struct Info {SurfaceTiling tiling=SurfaceTiling::Linear;unsigned original_width=
 struct SceGxmNotification {};
 struct State {unsigned res_multiplier=1;
  struct {bool use_texture_viewport=true;} features;
- struct {int retrieve_render_pass(int,bool load,bool store,bool){assert(load&&store);return 7;}} pipeline_cache;
+ struct {bool called_load=false;int retrieve_render_pass(int,bool load,bool store,bool){assert(store);called_load=load;return 7;}} pipeline_cache;
 };
 struct Context {
  bool has_rendered_in_recording=false,in_renderpass=false;
+ bool load_depth_on_resume=false;
  unsigned scene_timestamp=10;int current_render_pass=0,current_color_format=0;
- struct {struct {int data=1;} color_surface;} record;
+ struct {struct {int data=1;} color_surface;
+  struct {int depth_data=0,stencil_data=0;bool force_load=false;} depth_stencil_surface;} record;
  std::vector<int> submitted,pre,render;
  void stop_recording(SceGxmNotification,SceGxmNotification,bool submit){
   assert(!submit);submitted.insert(submitted.end(),pre.begin(),pre.end());
   submitted.insert(submitted.end(),render.begin(),render.end());pre.clear();render.clear();in_renderpass=false;
  }
  void start_recording(){has_rendered_in_recording=false;}
+ void enter_macroblock(State &state,bool ignore_macroblock){
+'''+macroblock+r'''
+ }
 };
 bool alias(Info info,State state,unsigned data_delta,vk::Format vk_format,
  unsigned original_width=1440,unsigned original_height=408,SurfaceTiling tiling=SurfaceTiling::Linear){
@@ -53,6 +61,15 @@ bool alias(Info info,State state,unsigned data_delta,vk::Format vk_format,
 }
 int main(){
  Info info;State state;
+ for(bool load:{false,true})for(bool backing:{false,true}) {
+  Context c;c.load_depth_on_resume=true;
+  c.record.depth_stencil_surface.force_load=load;
+  c.record.depth_stencil_surface.depth_data=backing;
+  c.enter_macroblock(state,false);
+  assert(c.load_depth_on_resume==(load&&backing));
+  c.load_depth_on_resume=true;c.enter_macroblock(state,true);
+  assert(c.load_depth_on_resume); // slow full-scene path preserves prior depth
+ }
  for(auto fmt:{vk::Format::eR8G8B8A8Unorm,vk::Format::eR8G8B8A8Srgb,vk::Format::eR8G8B8A8Snorm}) {
   assert(alias(info,state,0,fmt));assert(alias(info,state,4,fmt));
   assert(!alias(info,state,2,fmt));assert(!alias(info,state,8,fmt));
@@ -81,14 +98,16 @@ int main(){
  }
  // A macroblock may already have ended the pass, but its writes are still in
  // render_cmd. Both open and closed passes must precede the new snapshot.
- for(bool open:{false,true})for(bool prior_writes:{false,true})for(bool is_same_image:{false,true}) {
+ for(bool load_depth:{false,true})for(bool open:{false,true})for(bool prior_writes:{false,true})for(bool is_same_image:{false,true}) {
   Context c;auto *context=&c;c.in_renderpass=open;c.has_rendered_in_recording=prior_writes;
+  c.load_depth_on_resume=load_depth;
   c.render.push_back(1);
 '''+feedback+r'''
   c.pre.push_back(2); // snapshot recorded after production scheduling block
   if(prior_writes&&is_same_image) {
    assert(c.submitted==std::vector<int>{1});assert(c.scene_timestamp==11);
    assert(c.current_render_pass==7);assert(!c.has_rendered_in_recording);
+   assert(state.pipeline_cache.called_load==load_depth);
    c.render.push_back(3); // upcoming draw consuming the snapshot
    c.stop_recording({}, {}, false);
    assert((c.submitted==std::vector<int>{1,2,3}));
