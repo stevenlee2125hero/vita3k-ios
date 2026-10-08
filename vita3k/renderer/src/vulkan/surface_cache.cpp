@@ -271,8 +271,7 @@ void VKSurfaceCache::trace_color_lookup(ColorLookupPath path, const SceGxmTextur
     else if (type == SCE_GXM_TEXTURE_SWIZZLED_ARBITRARY)
         pixel_stride = next_power_of_two(width);
     const uint32_t guest_bpp = static_cast<uint32_t>(gxm::bits_per_pixel(format) / 8);
-    const uint32_t stride = type == SCE_GXM_TEXTURE_LINEAR_STRIDED
-        ? gxm::get_stride_in_bytes(texture) : pixel_stride * guest_bpp;
+    const uint32_t stride = type == SCE_GXM_TEXTURE_LINEAR_STRIDED ? gxm::get_stride_in_bytes(texture) : pixel_stride * guest_bpp;
     const vk::Format requested_format = color::translate_format(format);
     LOG_INFO("iOS RT lookup path={} count={} frame={} scene={} addr=0x{:08X} req={}x{} type=0x{:08X} "
              "guest_fmt=0x{:08X} vk_fmt={} guest_Bpp={} host_Bpp={} stride={} gamma={} mip={} scale={}",
@@ -614,9 +613,9 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     // Compare guest address ranges in 64-bit arithmetic. A wrapped 32-bit
     // end address could otherwise make an invalid overlapping surface appear
     // valid and feed an out-of-range region into the Vulkan copy path.
-    const bool addr_in_range_of_cache =
-        (static_cast<uint64_t>(address) + total_surface_size)
-        <= (static_cast<uint64_t>(ite->first) + info.total_bytes + 4);
+    const uint64_t requested_end = static_cast<uint64_t>(address) + total_surface_size;
+    const uint64_t cached_end = static_cast<uint64_t>(ite->first) + info.total_bytes + 4;
+    const bool addr_in_range_of_cache = requested_end <= cached_end;
 
     if (ite->first != address && !addr_in_range_of_cache) {
         // persona 4 sample from the top of a texture while the bottom wasn't rendered to, the fact that both the surface and
@@ -668,8 +667,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     // linear full-surface aliases and native resolution.  Other cases still
     // take the safe fallback: in particular guest U2F10F10F10 surfaces
     // expanded to host RGBA16F must not be treated as raw 32-bit bytes.
-    const bool byte_equivalent_linear_alias =
-        data_delta == 0 && state.res_multiplier == 1
+    const bool byte_equivalent_linear_alias = data_delta == 0 && state.res_multiplier == 1
         && tiling == SurfaceTiling::Linear && info.tiling == SurfaceTiling::Linear
         && start_x == 0 && start_sourced_line == 0
         && original_height == info.original_height
