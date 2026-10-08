@@ -965,6 +965,10 @@ vk::Pipeline PipelineCache::retrieve_pipeline(VKContext &context, SceGxmPrimitiv
     const GxmRecordState &record = context.record;
     // get the hash of the current context
     uint64_t key = XXH3_64bits(&record, record_pipeline_len);
+#ifdef VITA3K_PLATFORM_IOS
+    key ^= XXH64(context.shader_hints.vertex_textures, sizeof(context.shader_hints.vertex_textures), 0);
+    key ^= XXH64(context.shader_hints.fragment_textures, sizeof(context.shader_hints.fragment_textures), 1);
+#endif
 
     // add the hash of the blending
     SceGxmFragmentProgram &fragment_program_gxm = *record.fragment_program.get(mem);

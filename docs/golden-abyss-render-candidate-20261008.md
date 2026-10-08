@@ -183,6 +183,9 @@ include output format, sampled texture formats and mask mode. A program-only
 cache could reuse SPIR-V for a different material layout or float/integer output.
 Legacy precompile-by-program-hash is bypassed for these iOS variants; on-demand
 loading still uses the new per-variant disk cache.
+The pipeline key also includes sampled formats, texture format changes request
+pipeline refresh, and shader hints are zero initialized to avoid undefined
+values in unbound texture slots.
 
 Potential cost: additional copies, full precision and retained depth can reduce
 performance. No game files, boot, language/font, save or controller code changes.

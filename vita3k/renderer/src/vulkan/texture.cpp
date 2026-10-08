@@ -101,12 +101,14 @@ void sync_texture(VKContext &context, MemState &mem, std::size_t index, SceGxmTe
         return;
     }
 
-    if (index >= SCE_GXM_MAX_TEXTURE_UNITS) {
-        // Vertex textures
-        context.shader_hints.vertex_textures[index - SCE_GXM_MAX_TEXTURE_UNITS] = format;
-    } else {
-        context.shader_hints.fragment_textures[index] = format;
-    }
+    SceGxmTextureFormat &format_hint = is_vertex
+        ? context.shader_hints.vertex_textures[index - SCE_GXM_MAX_TEXTURE_UNITS]
+        : context.shader_hints.fragment_textures[index];
+#ifdef VITA3K_PLATFORM_IOS
+    if (format_hint != format)
+        context.refresh_pipeline = true;
+#endif
+    format_hint = format;
 
     std::optional<TextureLookupResult> lookup_result = std::nullopt;
 
