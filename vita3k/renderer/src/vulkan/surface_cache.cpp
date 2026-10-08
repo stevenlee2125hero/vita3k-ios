@@ -587,7 +587,16 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         default:
             break;
         }
-        stride_bytes = pixel_stride * gxm::bits_per_pixel(base_format) / 8;
+        // Compute the packed row pitch before narrowing to 32 bits. A
+        // malformed/unsupported texture must not wrap its stride and then
+        // accidentally match a valid cached color surface.
+        const uint64_t packed_row_bits = static_cast<uint64_t>(pixel_stride) * gxm::bits_per_pixel(base_format);
+        const uint64_t packed_row_bytes = packed_row_bits / 8;
+        if (packed_row_bytes > UINT32_MAX) {
+            trace_color_lookup(ColorLookupPath::PixelSize, texture, base_format, ite->second);
+            return std::nullopt;
+        }
+        stride_bytes = static_cast<uint32_t>(packed_row_bytes);
     }
     // A guest-provided row pitch can overflow a 32-bit multiplication.
     // Keep the requested range in 64 bits so it cannot alias an unrelated
