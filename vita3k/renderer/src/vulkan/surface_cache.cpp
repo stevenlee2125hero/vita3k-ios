@@ -633,7 +633,8 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     // Unknown or sub-byte guest formats cannot be reinterpreted by this
     // byte-addressed surface cache. Avoid division by zero below and fall
     // back to the normal texture upload path.
-    if (bytes_per_pixel_requested == 0 || bytes_per_pixel_in_store == 0
+    if (bytes_per_pixel_requested == 0 || bytes_per_pixel_in_store == 0 || stride_bytes == 0 || info.stride_bytes == 0
+        || (stride_bytes % bytes_per_pixel_requested) != 0 || (info.stride_bytes % bytes_per_pixel_in_store) != 0
         || std::max(bytes_per_pixel_requested, bytes_per_pixel_in_store) % std::min(bytes_per_pixel_requested, bytes_per_pixel_in_store) != 0) {
         trace_color_lookup(ColorLookupPath::PixelSize, texture, base_format, &info);
         return std::nullopt;
