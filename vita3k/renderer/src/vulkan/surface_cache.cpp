@@ -916,6 +916,19 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
                 casted->transition_buffer.init_buffer(vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc);
             }
 
+            // A partial render target must never be copied past its Vulkan
+            // image bounds. Initialize the staging bytes so uncopied texels
+            // are deterministic instead of sampling stale GPU memory.
+            if (partial_surface) {
+                cmd_buffer.fillBuffer(casted->transition_buffer.buffer, 0, buffer_size, 0);
+                const vk::MemoryBarrier fill_barrier{
+                    .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+                    .dstAccessMask = vk::AccessFlagBits::eTransferWrite
+                };
+                cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                    vk::PipelineStageFlagBits::eTransfer, {}, fill_barrier, {}, {});
+            }
+
             // copy the image to the buffer
             // RG32F -> RGBA8 is a raw byte reinterpretation, not a
             // floating-point conversion.  Source and destination row pitches
@@ -929,7 +942,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
                 .imageOffset = { 0,
                     static_cast<int32_t>(start_sourced_line),
                     0 },
-                .imageExtent = { info.width, height, 1 }
+                .imageExtent = { info.width, std::min(height, info.height - start_sourced_line), 1 }
             };
             cmd_buffer.copyImageToBuffer(info.texture.image, vk::ImageLayout::eGeneral, casted->transition_buffer.buffer, copy_image_buffer);
 
