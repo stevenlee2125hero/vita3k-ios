@@ -675,8 +675,16 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         trace_color_lookup(ColorLookupPath::TilingStride, texture, base_format, &info);
         return std::nullopt;
     }
-    uint32_t start_sourced_line = static_cast<uint32_t>((data_delta / stride_bytes) * state.res_multiplier);
-    uint32_t start_x = static_cast<uint32_t>((data_delta % stride_bytes) / bytes_per_pixel_requested * state.res_multiplier);
+    // Compute the subview origin without 32-bit wraparound. A wrapped
+    // offset can otherwise pass the overlap test and copy unrelated texels.
+    const uint64_t source_line = static_cast<uint64_t>(data_delta / stride_bytes) * state.res_multiplier;
+    const uint64_t source_x = static_cast<uint64_t>((data_delta % stride_bytes) / bytes_per_pixel_requested) * state.res_multiplier;
+    if (source_line >= info.height || source_x >= info.width) {
+        trace_color_lookup(ColorLookupPath::Outside, texture, base_format, &info);
+        return std::nullopt;
+    }
+    const uint32_t start_sourced_line = static_cast<uint32_t>(source_line);
+    const uint32_t start_x = static_cast<uint32_t>(source_x);
 
     const bool partial_surface = static_cast<uint64_t>(start_x) + width > info.width
         || static_cast<uint64_t>(start_sourced_line) + height > info.height;
