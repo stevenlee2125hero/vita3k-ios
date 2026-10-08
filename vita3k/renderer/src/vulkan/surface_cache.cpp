@@ -811,8 +811,12 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             if ((casted_vec[i].cropped_height == height) && (casted_vec[i].cropped_width == width) && (casted_vec[i].cropped_y == start_sourced_line) && (casted_vec[i].cropped_x == start_x) && (casted_vec[i].format == base_format) && (casted_vec[i].texture.format == vk_format)) {
                 casted = &casted_vec[i];
 
-                if (casted->scene_timestamp == scene_timestamp) {
-                    // already copied for this scene, don't do it again
+                if (!is_same_image && casted->scene_timestamp == scene_timestamp) {
+                    // Reuse only non-feedback copies within the scene.
+                    // A render target currently bound for drawing can change
+                    // between lookups without advancing scene_timestamp.
+                    // Reusing its previous snapshot then samples stale
+                    // character/UI texels instead of the latest GPU writes.
                     trace_color_lookup(ColorLookupPath::CachedCopy, texture, base_format, &info);
                     return TextureLookupResult{
                         casted->texture.view,
