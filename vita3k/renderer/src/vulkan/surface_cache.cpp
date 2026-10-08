@@ -611,7 +611,12 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     }
 
     // Check if we can use this surface
-    bool addr_in_range_of_cache = ((address + total_surface_size) <= (ite->first + info.total_bytes + 4));
+    // Compare guest address ranges in 64-bit arithmetic. A wrapped 32-bit
+    // end address could otherwise make an invalid overlapping surface appear
+    // valid and feed an out-of-range region into the Vulkan copy path.
+    const bool addr_in_range_of_cache =
+        (static_cast<uint64_t>(address) + total_surface_size)
+        <= (static_cast<uint64_t>(ite->first) + info.total_bytes + 4);
 
     if (ite->first != address && !addr_in_range_of_cache) {
         // persona 4 sample from the top of a texture while the bottom wasn't rendered to, the fact that both the surface and
