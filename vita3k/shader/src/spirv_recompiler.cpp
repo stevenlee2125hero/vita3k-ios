@@ -1542,10 +1542,16 @@ static spv::Function *make_frag_finalize_function(spv::Builder &b, const SpirvSh
         if (translate_state.is_vulkan && gxm::get_base_format(translate_state.hints->color_format) == SCE_GXM_COLOR_BASE_FORMAT_F32F32) {
             // Load the register words directly, avoiding float attachment
             // conversion/canonicalization of packed material bit patterns.
-            Operand raw_operand = color_val_operand;
-            raw_operand.type = DataType::UINT32;
-            color = utils::load(b, parameters, utils, features, raw_operand, 0xF, reg_off);
             output_type = b.makeVectorType(b.makeUintType(32), 4);
+            if (color_val_operand.type == DataType::F32) {
+                Operand raw_operand = color_val_operand;
+                raw_operand.type = DataType::UINT32;
+                color = utils::load(b, parameters, utils, features, raw_operand, 0xF, reg_off);
+            } else {
+                // Numeric F16/normalized outputs still expand to float32
+                // values first; only the resulting RG32 storage is raw.
+                color = b.createUnaryOp(spv::OpBitcast, output_type, color);
+            }
             precision = spv::NoPrecision;
         }
 #endif
