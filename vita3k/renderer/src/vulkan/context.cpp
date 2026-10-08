@@ -179,6 +179,11 @@ void set_context(VKContext &context, MemState &mem, VKRenderTarget *rt, const Fe
     if (context.state.features.support_shader_interlock)
         // we must always store the depth stencil
         force_store = true;
+#ifdef VITA3K_PLATFORM_IOS
+    // A later texture lookup may split this scene to snapshot color feedback.
+    // Preserve depth/stencil from the first pass, even without guest backing.
+    force_store = true;
+#endif
     context.current_render_pass = context.state.pipeline_cache.retrieve_render_pass(vk_format, force_load, force_store, color_surface_fin == nullptr);
     if (context.state.features.support_shader_interlock)
         // also retrieve / create the shader interlock pass
@@ -261,6 +266,7 @@ void VKContext::start_recording(bool first_in_scene) {
     prerender_cmd.begin(begin_info);
 
     is_recording = true;
+    has_rendered_in_recording = false;
 
     // set all the dynamic state here
     render_cmd.setViewport(0, viewport);
@@ -353,6 +359,7 @@ void VKContext::start_render_pass(bool create_descriptor_set) {
     };
     curr_renderpass_info.setClearValues(curr_clear_values);
     render_cmd.beginRenderPass(curr_renderpass_info, vk::SubpassContents::eInline);
+    has_rendered_in_recording = true;
 
     // set the renderpass info ready in case we need to switch between classic and framebuffer fetch usage
     curr_renderpass_info.setClearValues(nullptr);

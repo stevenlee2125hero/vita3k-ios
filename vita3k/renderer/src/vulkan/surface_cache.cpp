@@ -724,18 +724,19 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     // guest texture format.  The pixel widths then differ even though the
     // byte span is identical (Golden Abyss: RG32F 720x408 -> RGBA8 1440x408).
     // Restrict this fast path to the observed, byte-compatible *host* formats,
-    // linear full-surface aliases and native resolution.  Other cases still
-    // take the safe fallback: in particular guest U2F10F10F10 surfaces
+    // linear full-width aliases and native resolution, including the second
+    // 32-bit word sampled as SNORM at address + 4. Other cases still
+    // take the fallback: in particular guest U2F10F10F10 surfaces
     // expanded to host RGBA16F must not be treated as raw 32-bit bytes.
-    const bool byte_equivalent_linear_alias = data_delta == 0 && state.res_multiplier == 1
+    const bool byte_equivalent_linear_alias = data_delta <= 4 && (data_delta % 4) == 0 && state.res_multiplier == 1
         && tiling == SurfaceTiling::Linear && info.tiling == SurfaceTiling::Linear
-        && start_x == 0 && start_sourced_line == 0
+        && start_sourced_line == 0
         && original_height == info.original_height
         && static_cast<uint64_t>(original_width) == static_cast<uint64_t>(info.original_width) * 2
         && bytes_per_pixel_requested == 4 && bytes_per_pixel_in_store == 8
         && stride_bytes == info.stride_bytes
         && info.texture.format == vk::Format::eR32G32Sfloat
-        && (vk_format == vk::Format::eR8G8B8A8Unorm || vk_format == vk::Format::eR8G8B8A8Srgb)
+        && (vk_format == vk::Format::eR8G8B8A8Unorm || vk_format == vk::Format::eR8G8B8A8Srgb || vk_format == vk::Format::eR8G8B8A8Snorm)
         && static_cast<uint64_t>(original_width) * 4 == static_cast<uint64_t>(info.original_width) * 8;
     if (partial_surface && bytes_per_pixel_requested != bytes_per_pixel_in_store && !byte_equivalent_linear_alias) {
         trace_color_lookup(ColorLookupPath::PartialTypeless, texture, base_format, &info);
@@ -756,7 +757,13 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
 
     // Guest tiling describes the memory address mapping, not the host image
     // layout. Format-compatible surfaces can use a sampled view directly.
-    if (state.features.use_texture_viewport && base_format == info.format) {
+    bool can_use_viewport = state.features.use_texture_viewport && base_format == info.format;
+#ifdef VITA3K_PLATFORM_IOS
+    // Sampling a bound color attachment is not an ordinary sampled-image
+    // dependency on Metal. Snapshot it after the preceding draws instead.
+    can_use_viewport = can_use_viewport && !is_same_image;
+#endif
+    if (can_use_viewport) {
         trace_color_lookup(is_same_image ? ColorLookupPath::FeedbackViewport : ColorLookupPath::Viewport,
             texture, base_format, &info);
         // use a texture viewport
@@ -819,7 +826,20 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     }
 
     if (is_same_image || (start_sourced_line != 0) || (start_x != 0) || (info.width != width) || (info.height != height) || (info.format != base_format)) {
-        const uint64_t scene_timestamp = reinterpret_cast<VKContext *>(state.context)->scene_timestamp;
+        VKContext *context = reinterpret_cast<VKContext *>(state.context);
+#ifdef VITA3K_PLATFORM_IOS
+        if (is_same_image && context->has_rendered_in_recording) {
+            // Merely ending a render pass is insufficient: prerender_cmd is
+            // submitted before render_cmd. Close both so this snapshot follows
+            // all preceding draws, including a closed macroblock render pass.
+            SceGxmNotification empty_notification{};
+            context->stop_recording(empty_notification, empty_notification, false);
+            context->current_render_pass = state.pipeline_cache.retrieve_render_pass(context->current_color_format, true, true, !context->record.color_surface.data);
+            context->start_recording();
+            context->scene_timestamp++;
+        }
+#endif
+        const uint64_t scene_timestamp = context->scene_timestamp;
 
         std::vector<CastedTexture> &casted_vec = info.casted_textures;
 
@@ -858,7 +878,6 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         }
 
         // use prerender cmd as we can't copy an image or use pipeline barriers in a render pass
-        VKContext *context = reinterpret_cast<VKContext *>(state.context);
         vk::CommandBuffer cmd_buffer = context->prerender_cmd;
 
         if (casted == nullptr) {

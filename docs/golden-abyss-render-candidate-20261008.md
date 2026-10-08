@@ -108,3 +108,44 @@ of every mip/face, keeping source stride/advance calculations independent of
 previous host expansion. The production-branch regression asserts the expanded
 layout metadata as well as the decoded bytes. The first entry-only correction
 b1c8435e is superseded before device delivery.
+
+## Second device rejection: log-guided alias and feedback correction
+
+The 23:23 session identifies the installed merge revision 2cf0659, corresponding
+to candidate 6fb93d23. It still shows purple/cyan character noise and corrupt
+menus. This candidate is rejected as a visual fix. The log has no packed F10
+upload marker; the previous CPU-upload correction was not demonstrated to be
+the relevant game path. Surface sync is disabled in the active configuration.
+
+The actual log repeatedly records a GPU RG32F 720x408 render target at
+0x60A9FEC0, stride 5760, sampled both as RGBA8 1440x408 at its base and as
+RGBA8 SNORM 1440x408 at 0x60A9FEC4. The latter is rejected as partial-typeless
+(48,945 occurrences by frame 2438), although its byte rows match exactly.
+Reverting to guest memory when GPU readback is disabled cannot preserve the
+rendered words. The alias admission now includes the observed aligned +4
+SNORM view. The staging copy preserves raw words and row crossings, allocates
+the additional four bytes and clears the uncopied terminal word.
+
+The same session also logs thousands of feedback-viewport lookups on the active
+F11F11F10 color attachment (including 128x64 crops of a 256x512 target). On iOS,
+these now use distinct cropped snapshot images instead of sampling the bound
+attachment. If any earlier pass has been recorded, both command buffers are
+closed first: prior prerender, prior render, new snapshot prerender, new render.
+This also covers macroblock code that already ended a render pass without
+ending its command buffers. Scene timestamps advance after the split.
+
+Depth/stencil is stored from the first pass and loaded after the first draw,
+including subsequent macroblocks. The iOS fallback depth image no longer has
+transient usage, preventing memoryless allocation from losing depth across
+snapshot splits. Other platforms retain their previous feedback/depth behavior.
+
+check_rt_alias_feedback.py extracts production alias admission, byte offset,
+viewport selection and feedback split code. It checks +0/+4 UNORM/sRGB/SNORM,
+rejects incompatible layouts/expanded formats, checks byte-distinct rows and
+terminal padding for heights 1/2/408, and tests prior-draw/snapshot/next-draw
+ordering for open and already-closed passes under ASan/UBSan. The prior three
+regression suites also pass. These tests do not execute Metal and do not prove
+the actual game's colors restored. A full upstream-core build is required.
+
+Only the combined log-guided candidate is to be delivered after complete build
+and self-audit; intermediate edits are not device-install requests.

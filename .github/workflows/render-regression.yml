@@ -5,6 +5,10 @@ on:
       - 'vita3k/renderer/src/texture/format.cpp'
       - 'vita3k/renderer/src/texture/cache.cpp'
       - 'vita3k/renderer/src/vulkan/surface_cache.cpp'
+      - 'vita3k/renderer/src/vulkan/context.cpp'
+      - 'vita3k/renderer/src/vulkan/creation.cpp'
+      - 'vita3k/renderer/src/vulkan/scene.cpp'
+      - 'vita3k/renderer/include/renderer/vulkan/types.h'
       - 'tools/render-regression/**'
       - '.github/workflows/render-regression.yml'
   pull_request:
@@ -12,6 +16,10 @@ on:
       - 'vita3k/renderer/src/texture/format.cpp'
       - 'vita3k/renderer/src/texture/cache.cpp'
       - 'vita3k/renderer/src/vulkan/surface_cache.cpp'
+      - 'vita3k/renderer/src/vulkan/context.cpp'
+      - 'vita3k/renderer/src/vulkan/creation.cpp'
+      - 'vita3k/renderer/src/vulkan/scene.cpp'
+      - 'vita3k/renderer/include/renderer/vulkan/types.h'
       - 'tools/render-regression/**'
       - '.github/workflows/render-regression.yml'
 jobs:
@@ -25,3 +33,5 @@ jobs:
         run: python3 tools/render-regression/check_surface_lifecycle.py
       - name: Test packed float upload despite integer format support
         run: python3 tools/render-regression/check_u2f10_upload.py
+      - name: Test observed RT aliases and feedback command ordering
+        run: python3 tools/render-regression/check_rt_alias_feedback.py
