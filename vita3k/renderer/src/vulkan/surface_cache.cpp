@@ -663,7 +663,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         && tiling == SurfaceTiling::Linear && info.tiling == SurfaceTiling::Linear
         && start_x == 0 && start_sourced_line == 0
         && original_height == info.original_height
-        && original_width == info.original_width * 2
+        && static_cast<uint64_t>(original_width) == static_cast<uint64_t>(info.original_width) * 2
         && bytes_per_pixel_requested == 4 && bytes_per_pixel_in_store == 8
         && stride_bytes == info.stride_bytes
         && info.texture.format == vk::Format::eR32G32Sfloat
@@ -834,7 +834,13 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             LOG_INFO_ONCE("Game is doing typeless copies");
             trace_color_lookup(ColorLookupPath::TypelessCopy, texture, base_format, &info);
             // We must use a transition buffer
-            vk::DeviceSize buffer_size = stride_bytes * static_cast<size_t>(state.res_multiplier * align(height, 4)) + start_x * bytes_per_pixel_requested;
+            // The intermediate buffer contains the raw bytes of the host
+            // image.  Allocate from the actual source row pitch rather than
+            // assuming the guest format has the same Vulkan byte footprint.
+            // The additional alignment rows are retained for existing callers.
+            const vk::DeviceSize buffer_size =
+                static_cast<vk::DeviceSize>(info.stride_bytes) * state.res_multiplier * align(height, 4)
+                + static_cast<vk::DeviceSize>(start_x) * bytes_per_pixel_requested;
             if (!casted->transition_buffer.buffer || casted->transition_buffer.size < buffer_size) {
                 // create or re-create the buffer
                 state.frame().destroy_queue.add_buffer(casted->transition_buffer);
@@ -843,6 +849,9 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             }
 
             // copy the image to the buffer
+            // RG32F -> RGBA8 is a raw byte reinterpretation, not a
+            // floating-point conversion.  Source and destination row pitches
+            // must describe the same byte span for the alias path.
             const uint32_t src_pixel_stride = static_cast<uint32_t>((info.stride_bytes / bytes_per_pixel_in_store) * state.res_multiplier);
             vk::BufferImageCopy copy_image_buffer{
                 .bufferOffset = 0,
