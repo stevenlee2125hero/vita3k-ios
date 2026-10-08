@@ -317,7 +317,9 @@ SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(Mem
         --ite;
     // ite is now the first item with an address lower or equal to key
 
-    overlap = (overlap && (ite->first + ite->second->total_bytes) > address);
+    // Surface addresses are 32-bit guest pointers, but their end address
+    // must be compared without wrapping at the 4 GiB boundary.
+    overlap = (overlap && (static_cast<uint64_t>(ite->first) + ite->second->total_bytes) > address);
 
     const SceGxmColorBaseFormat base_format = gxm::get_base_format(color->colorFormat);
     vk::Format vk_format = color::translate_format(base_format);
