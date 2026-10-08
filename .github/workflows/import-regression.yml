@@ -17,3 +17,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Test production archive installation under sanitizers
         run: python3 tools/import-regression/check_archive_import.py
+      - name: Test decrypt commit preserves installed data on failure
+        run: python3 tools/import-regression/check_nonpdrm_transaction.py
