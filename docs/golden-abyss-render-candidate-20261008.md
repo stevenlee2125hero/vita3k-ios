@@ -46,3 +46,25 @@ a cache entry resolves this separate scheduling issue.
 One-time candidate validation: reuse current game/save/settings, inspect character
 skin and clothing in the same jungle scene, open pause/settings/notebook menus,
 confirm Traditional Chinese subtitles, then play through one scene transition.
+
+
+## Self-audit follow-up
+
+The initial candidate e6153789 compiled and packaged successfully (run
+37785422118). A subsequent self-audit found two additional concrete defects:
+
+- `destroy_surface` queued alternate_view for destruction but left its handle
+  non-null in the reusable cache slot. It also retained old readback buffers,
+  downscale images and swscale contexts. A replacement surface could therefore
+  reuse a destroyed view, an undersized staging buffer or an old conversion
+  layout. Retirement now clears the handle, retires associated framebuffers,
+  defers GPU resource destruction, and resets all auxiliary resources/state.
+- RGB24 surfaces use RGBA8 host texels. The readback staging allocation was
+  sized from 3-byte guest rows although Vulkan writes 4-byte host texels.
+  It now uses a 64-bit host footprint from the copy's pixel stride.
+
+`check_surface_lifecycle.py` compiles the production retirement body with
+recording GPU stubs and checks slot reuse, null/stale view rejection, deferred
+resource retirement and six RGB staging sizes under ASan/UBSan. These are host
+logic tests; they do not execute a Vulkan driver. The decoder tests still pass.
+Initial artifact is superseded; only the follow-up candidate should be tested.

@@ -126,7 +126,26 @@ void VKSurfaceCache::destroy_surface(ColorSurfaceCacheInfo &info) {
         destroy_queue.add(sampled_view.view);
     info.sampled_views.clear();
 
+    if (info.alternate_view)
+        destroy_framebuffers(info.alternate_view);
     destroy_queue.add(info.alternate_view);
+    info.alternate_view = nullptr;
+
+    // A cache slot can be reused with a different format/extent. Retire all
+    // auxiliary GPU allocations with the old surface, never reuse their size
+    // or views for its replacement. Queue destruction to keep in-flight work safe.
+    if (info.blit_image) {
+        destroy_queue.add_image(*info.blit_image);
+        info.blit_image.reset();
+    }
+    if (info.copy_buffer) {
+        destroy_queue.add_buffer(*info.copy_buffer);
+        info.copy_buffer.reset();
+    }
+    sws_freeContext(info.sws_context);
+    info.sws_context = nullptr;
+    info.need_post_surface_sync = false;
+    info.need_buffer_sync = false;
 
     destroy_framebuffers(info.texture.view);
     destroy_queue.add_image(info.texture);
@@ -1633,6 +1652,8 @@ ColorSurfaceCacheInfo *VKSurfaceCache::perform_surface_sync() {
         image_layout = vk::ImageLayout::eTransferSrcOptimal;
     }
 
+    const uint32_t pixel_stride = static_cast<uint32_t>(
+        (static_cast<uint64_t>(last_written_surface->stride_bytes) * 8) / gxm::bits_per_pixel(last_written_surface->format));
     vk::Buffer buffer;
     uint32_t offset;
     // Without memory mapping the GPU cannot write guest RAM directly, so
@@ -1647,7 +1668,10 @@ ColorSurfaceCacheInfo *VKSurfaceCache::perform_surface_sync() {
         vkutil::Buffer &copy_buffer = *last_written_surface->copy_buffer;
 
         if (!copy_buffer.buffer) {
-            copy_buffer.size = last_written_surface->stride_bytes * last_written_surface->original_height;
+            // Vulkan writes host texels (RGB24 is stored as RGBA8), not
+            // guest bytes. Allocating the guest footprint overruns RGB staging.
+            copy_buffer.size = static_cast<vk::DeviceSize>(pixel_stride)
+                * last_written_surface->original_height * vk::blockSize(last_written_surface->texture.format);
             copy_buffer.init_buffer(vk::BufferUsageFlagBits::eTransferDst, vkutil::vma_mapped_alloc);
         }
 
@@ -1661,7 +1685,6 @@ ColorSurfaceCacheInfo *VKSurfaceCache::perform_surface_sync() {
         last_written_surface->need_post_surface_sync = !is_swizzle_identity;
         std::tie(buffer, offset) = state.get_matching_mapping(last_written_surface->data);
     }
-    const uint32_t pixel_stride = (last_written_surface->stride_bytes * 8) / gxm::bits_per_pixel(last_written_surface->format);
     vk::BufferImageCopy copy{
         .bufferOffset = offset,
         .bufferRowLength = pixel_stride,
