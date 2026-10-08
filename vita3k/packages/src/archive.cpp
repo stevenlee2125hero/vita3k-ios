@@ -47,6 +47,14 @@ bool read_archive_path(mz_zip_archive &zip, mz_uint index, std::string &name) {
     if (view.find('\0') != std::string_view::npos)
         return false;
     name.assign(view);
+    // ZIPs made by Windows tools sometimes retain backslashes; Unix zip
+    // commonly prefixes every entry with './'. Normalize those spellings
+    // before root discovery and extraction, retaining traversal checks below.
+    std::replace(name.begin(), name.end(), '\\', '/');
+    while (name.starts_with("./"))
+        name.erase(0, 2);
+    if (name.empty() && mz_zip_reader_is_file_a_directory(&zip, index))
+        name = "."; // Optional archive root directory, skipped by inspection.
     return true;
 }
 
@@ -225,6 +233,7 @@ ArchiveInspection inspect_open_archive(mz_zip_archive &zip) {
     };
     std::vector<SfoEntry> sfo_entries;
     std::set<std::string> roots;
+    std::set<std::string> file_paths;
     for (mz_uint index = 0; index < entry_count; ++index) {
         mz_zip_archive_file_stat stat{};
         if (!mz_zip_reader_file_stat(&zip, index, &stat)) {
@@ -236,6 +245,8 @@ ArchiveInspection inspect_open_archive(mz_zip_archive &zip) {
             ++result.unsafe_path_count;
             continue;
         }
+        if (name == "." && mz_zip_reader_is_file_a_directory(&zip, index))
+            continue;
         if (!safe_archive_path(name)) {
             ++result.unsafe_path_count;
             continue;
@@ -249,6 +260,10 @@ ArchiveInspection inspect_open_archive(mz_zip_archive &zip) {
             continue;
         }
         ++result.file_count;
+        if (!file_paths.insert(name).second) {
+            result.detail = "Archive contains duplicate application file paths.";
+            return result;
+        }
         std::string root;
         if (find_content_root(name, root) && roots.insert(root).second)
             sfo_entries.push_back({ index, std::move(root) });
