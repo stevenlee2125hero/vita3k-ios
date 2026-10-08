@@ -975,8 +975,10 @@ void VKState::late_init(const Config &cfg, const std::string_view game_id, MemSt
 #ifdef VITA3K_PLATFORM_IOS
     // Material atlases need the exact guest crop, wrap and texel footprint.
     // Prefer explicit GPU copies over the approximate viewport optimization.
-    features.use_texture_viewport = false;
-    LOG_INFO("iOS material accuracy v14: integer RG32 storage, strict float math, exact texture crops, fresh shader cache");
+    if (game_id == "PCSD00001") {
+        features.use_texture_viewport = false;
+        LOG_INFO("iOS material accuracy v15: integer RG32 storage, strict float math, exact texture crops, fresh shader cache");
+    }
 #endif
 
     // parse the mapping method

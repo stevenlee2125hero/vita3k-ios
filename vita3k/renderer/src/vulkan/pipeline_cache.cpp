@@ -465,6 +465,9 @@ static const vk::SpecializationInfo srgb_info_false = {
 };
 
 vk::PipelineShaderStageCreateInfo PipelineCache::retrieve_shader(const SceGxmProgram *program, const Sha256Hash &program_hash, bool is_vertex, bool maskupdate, MemState &mem, const shader::Hints &hints, bool is_srgb) {
+    // A mask update replaces only the fragment body. The vertex program
+    // must still produce position and varyings for Metal rasterization.
+    maskupdate = maskupdate && !is_vertex;
     Sha256Hash hash = program_hash;
 #ifdef VITA3K_PLATFORM_IOS
     // Output format and sampled texture formats affect generated SPIR-V.

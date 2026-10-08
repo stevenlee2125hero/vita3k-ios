@@ -1850,8 +1850,16 @@ static void generate_update_mask_body(spv::Builder &b, TranslationState &transla
     const spv::Id writing_mask_var = utils::create_access_chain(b, spv::StorageClassUniform, translate_state.render_info_id, { b.makeIntConstant(FRAG_UNIFORM_writing_mask) });
     const spv::Id writing_mask = b.createLoad(writing_mask_var, spv::NoPrecision);
 
-    const spv::Id v4 = b.makeVectorType(b.makeFloatType(32), 4);
-    const spv::Id mask_v = b.createCompositeConstruct(v4, { writing_mask, writing_mask, writing_mask, writing_mask });
+    spv::Id v4 = b.makeVectorType(b.makeFloatType(32), 4);
+    spv::Id mask_v = b.createCompositeConstruct(v4, { writing_mask, writing_mask, writing_mask, writing_mask });
+#ifdef VITA3K_PLATFORM_IOS
+    if (translate_state.is_vulkan && gxm::get_base_format(translate_state.hints->color_format) == SCE_GXM_COLOR_BASE_FORMAT_F32F32) {
+        // Metal requires integer fragment outputs for integer attachments,
+        // including the separate mask-update shader body.
+        v4 = b.makeVectorType(b.makeUintType(32), 4);
+        mask_v = b.createUnaryOp(spv::OpBitcast, v4, mask_v);
+    }
+#endif
 
     const spv::Id out = b.createVariable(spv::NoPrecision, spv::StorageClassOutput, v4, "out_color");
     translate_state.interfaces.push_back(out);
@@ -2105,7 +2113,7 @@ GeneratedShader convert_gxp(const SceGxmProgram &program, const std::string &sha
     bool force_shader_debug, const std::function<bool(const std::string &ext, const std::string &dump)> &dumper) {
     TranslationState translation_state;
     translation_state.is_fragment = program.is_fragment();
-    translation_state.is_maskupdate = maskupdate;
+    translation_state.is_maskupdate = maskupdate && program.get_type() == SceGxmProgramType::Fragment;
     translation_state.is_target_glsl = (target == Target::GLSLOpenGL);
     translation_state.is_vulkan = (target == Target::SpirVVulkan);
     translation_state.hints = &hints;

@@ -12,6 +12,14 @@ body = s[a:s.index('\n    }\n#endif', a)]
 p = (root / 'vita3k/renderer/src/vulkan/pipeline_cache.cpp').read_text()
 v = p.index('    std::array<uint32_t, SCE_GXM_MAX_TEXTURE_UNITS +')
 variant = p[v:p.index('\n    for (size_t i = 0; i < sizeof(variant_tag);', v)]
+mask_stage = p[p.index('    maskupdate = maskupdate && !is_vertex;'):p.index('    maskupdate = maskupdate && !is_vertex;') + len('    maskupdate = maskupdate && !is_vertex;')]
+mask_start = s.index('static void generate_update_mask_body(')
+mask_body = s[mask_start:s.index('\nstatic SpirvCode convert_gxp_to_spirv_impl', mask_start)]
+mask_guard_start = s.index('    translation_state.is_maskupdate = maskupdate &&')
+mask_guard = s[mask_guard_start:s.index(';', mask_guard_start)+1]
+r = (root / 'vita3k/renderer/src/vulkan/renderer.cpp').read_text()
+crop_start = r.index('    if (game_id == "PCSD00001")')
+crop = r[crop_start:r.index('\n#endif', crop_start)]
 code = r'''
 #include <vector>
 #include <cstdint>
@@ -19,7 +27,29 @@ code = r'''
 #include <cassert>
 #include <bit>
 #include <array>
-namespace spv {enum{OpDecorate=71,DecorationRelaxedPrecision=0};}
+#include <map>
+#include <string_view>
+#define LOG_INFO(...) ((void)0)
+#define VITA3K_PLATFORM_IOS 1
+namespace spv {
+using Id=uint32_t;
+enum{OpDecorate=71,DecorationRelaxedPrecision=0,NoPrecision=0,StorageClassUniform=2,StorageClassOutput=3,DecorationLocation=30,OpBitcast=124};
+struct Builder {
+ std::map<Id,Id> types;Id next=100,output_type=0;
+ Id makeFloatType(int){return 1;}Id makeUintType(int){return 2;}Id makeIntConstant(int){return 3;}
+ Id makeVectorType(Id scalar,int count){assert(count==4);return 10+scalar;}
+ Id createLoad(Id,int){return 4;}
+ Id createCompositeConstruct(Id type,std::initializer_list<Id>){types[next]=type;return next++;}
+ Id createUnaryOp(int,Id type,Id){types[next]=type;return next++;}
+ Id createVariable(int,int,Id type,const char*){output_type=type;types[next]=type;return next++;}
+ void addDecoration(Id,int,int){}void createStore(Id value,Id output){assert(types[value]==types[output]);}
+};
+}
+enum class SceGxmProgramType{Vertex,Fragment};
+constexpr uint32_t SCE_GXM_COLOR_BASE_FORMAT_F32F32=11;
+constexpr int FRAG_UNIFORM_writing_mask=0;
+namespace gxm {uint32_t get_base_format(uint32_t f){return f;}}
+namespace utils {spv::Id create_access_chain(spv::Builder&,int,spv::Id,std::initializer_list<spv::Id>){return 1;}}
 constexpr size_t SCE_GXM_MAX_TEXTURE_UNITS=16;
 struct SceGxmVertexAttribute {uint16_t streamIndex,offset;uint8_t format,componentCount;uint16_t regIndex;};
 static_assert(sizeof(SceGxmVertexAttribute)==8);
@@ -30,14 +60,27 @@ uint64_t XXH64(const void* data,size_t size,uint64_t seed){
  for(size_t i=0;i<size;i++)h=(h^bytes[i])*1099511628211ull;return h;
 }
 uint64_t material_variant(const Hints& hints,bool is_vertex,bool maskupdate){
-'''+variant+r'''
+'''+mask_stage+variant+r'''
  return variant_tag;
+}
+struct TranslationState {spv::Id render_info_id=0;bool is_vulkan=true,is_maskupdate=false;const Hints* hints;std::vector<spv::Id> interfaces;};
+'''+mask_body+r'''
+struct Program {SceGxmProgramType type;auto get_type()const{return type;}};
+bool mask_enabled(const Program& program,bool maskupdate){TranslationState translation_state{};
+'''+mask_guard+r'''
+ return translation_state.is_maskupdate;
+}
+struct Features {bool use_texture_viewport=true;};
+void exact_crop(Features& features,std::string_view game_id){
+'''+crop+r'''
 }
 struct Shader{std::vector<uint32_t> spirv;};
 void filter(Shader &shader){
 '''+body+r'''
 }
 int main(){
+ Features golden,other;exact_crop(golden,"PCSD00001");exact_crop(other,"PCSE00551");
+ assert(!golden.use_texture_viewport && other.use_texture_viewport);
  std::vector<SceGxmVertexAttribute> attrs{{0,0,0,3,0}};
  Hints hints{};hints.attributes=&attrs;
  const auto vertex=material_variant(hints,true,false),fragment=material_variant(hints,false,false);
@@ -52,7 +95,15 @@ int main(){
  assert(material_variant(hints,true,false)==vertex);hints.fragment_textures[2]=0;
  hints.color_format=23;assert(material_variant(hints,false,false)!=fragment);
  assert(material_variant(hints,true,false)==vertex);
- assert(material_variant(hints,true,true)!=vertex);
+ assert(material_variant(hints,true,true)==vertex);
+ assert(material_variant(hints,false,true)!=material_variant(hints,false,false));
+ assert(!mask_enabled({SceGxmProgramType::Vertex},true));
+ assert(mask_enabled({SceGxmProgramType::Fragment},true));
+ assert(!mask_enabled({SceGxmProgramType::Fragment},false));
+ TranslationState state{};state.hints=&hints;
+ hints.color_format=0;spv::Builder float_builder;generate_update_mask_body(float_builder,state);assert(float_builder.output_type==11);
+ hints.color_format=SCE_GXM_COLOR_BASE_FORMAT_F32F32;spv::Builder uint_builder;generate_update_mask_body(uint_builder,state);assert(uint_builder.output_type==12);
+ state.is_vulkan=false;spv::Builder gl_builder;generate_update_mask_body(gl_builder,state);assert(gl_builder.output_type==11);
  Shader s{{0x07230203,0x10000,0,16,0,
   (3u<<16)|71,2,0, // relaxed precision: remove
   (4u<<16)|71,3,30,0, // Location: keep
@@ -81,4 +132,4 @@ with tempfile.TemporaryDirectory() as tmp:
     subprocess.run(['c++', '-std=c++20', '-fsanitize=address,undefined',
                     str(cpp), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True, env=dict(os.environ, ASAN_OPTIONS='detect_leaks=0'))
-print('PASS: production SPIR-V precision filtering, raw words and material/attribute variant keys (hash stub)')
+print('PASS: production precision/raw words, variant keys, fragment-only masks and attachment output types (builder/hash stubs)')
