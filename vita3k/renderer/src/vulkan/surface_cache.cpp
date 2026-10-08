@@ -806,7 +806,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             .image = info.texture.image,
             .subresourceRange = vkutil::color_subresource_range
         };
-        cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader | vk::PipelineStageFlagBits::eTransfer,
+        cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader | vk::PipelineStageFlagBits::eComputeShader | vk::PipelineStageFlagBits::eTransfer,
             vk::PipelineStageFlagBits::eTransfer, {}, {}, {}, source_barrier);
 
         if (partial_surface && !byte_equivalent_linear_alias) {
