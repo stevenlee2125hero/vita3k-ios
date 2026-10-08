@@ -645,9 +645,15 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         return std::nullopt;
     }
 
-    // TODO: this is true only for linear textures (and also kind of for tiled textures) (and in this case start_x = 0),
-    // for swizzled textures this is different
+    // A byte offset within a tiled or Morton-swizzled image does not
+    // correspond to a linear (row, column) offset. The calculation below
+    // is only valid for linear surfaces. Reject offset subviews of other
+    // layouts instead of sampling an unrelated patch of the render target.
     const uint32_t data_delta = address - ite->first;
+    if (data_delta != 0 && tiling != SurfaceTiling::Linear) {
+        trace_color_lookup(ColorLookupPath::TilingStride, texture, base_format, &info);
+        return std::nullopt;
+    }
     uint32_t start_sourced_line = static_cast<uint32_t>((data_delta / stride_bytes) * state.res_multiplier);
     uint32_t start_x = static_cast<uint32_t>((data_delta % stride_bytes) / bytes_per_pixel_requested * state.res_multiplier);
 
