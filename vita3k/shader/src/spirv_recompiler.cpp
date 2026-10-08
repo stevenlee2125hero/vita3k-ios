@@ -748,8 +748,13 @@ static void create_fragment_inputs(spv::Builder &b, SpirvShaderParameters &param
             const spv::Id ivec2 = b.makeVectorType(b.makeIntType(32), 2);
             coord_0 = b.makeCompositeConstant(ivec2, { coord_0, coord_0 });
             source = b.createOp(spv::OpImageRead, raw_rg32 ? b.makeVectorType(input_scalar, 4) : v4, { b.createLoad(last_frag_data, spv::NoPrecision), coord_0 });
-            if (raw_rg32)
+            if (raw_rg32) {
                 source = b.createUnaryOp(spv::OpBitcast, v4, source);
+                // A two-channel float image supplies alpha=1. Integer images
+                // also supply integer 1, which must not become a subnormal
+                // float merely because the stored R/G words are bitcast.
+                source = b.createOp(spv::OpCompositeInsert, v4, { { true, b.makeFloatConstant(1.0f) }, { true, source }, { false, 3 } });
+            }
             b.setPrecision(source, precision);
 
             translation_state.last_frag_data_id = last_frag_data;
