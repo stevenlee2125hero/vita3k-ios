@@ -864,7 +864,12 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         // A Vita guest format can occupy the same bytes as another guest
         // format while its expanded host image uses a different block size.
         // Route those cases through the buffer-based reinterpretation path.
-        const bool host_copy_compatible = vk::blockSize(info.texture.format) == vk::blockSize(vk_format);
+        // Equal block sizes alone do not imply that Vulkan image-to-image
+        // copies are format-compatible (for example, integer vs floating
+        // formats may belong to different compatibility classes). Only use
+        // this direct path for identical host formats; other byte-preserving
+        // reinterpretations must go through the staging-buffer path.
+        const bool host_copy_compatible = info.texture.format == vk_format;
         if (bytes_per_pixel_requested == bytes_per_pixel_in_store && host_copy_compatible) {
             trace_color_lookup(ColorLookupPath::Copy, texture, base_format, &info);
             const uint32_t copy_width = std::min(width, info.width - start_x);
