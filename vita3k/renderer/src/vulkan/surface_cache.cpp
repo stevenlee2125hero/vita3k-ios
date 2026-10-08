@@ -654,6 +654,28 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     // The typeless conversion path uses a row-strided transition buffer and
     // cannot safely synthesize texels outside the cached surface.
     if (partial_surface && bytes_per_pixel_requested != bytes_per_pixel_in_store) {
+        // A wider guest texture can occupy exactly the same bytes as a
+        // narrower render target (e.g. 1440x4 versus 720x8).  Do not
+        // mistake that for proof that a Vulkan image copy is safe: the
+        // cached host format may have a different byte size from the
+        // guest surface format (notably U2F10F10F10 -> RGBA16F).
+        // Record the byte-equivalent cases so an on-device log can
+        // distinguish a valid guest alias from an actual out-of-bounds
+        // request before changing the typeless conversion path.
+#ifdef VITA3K_PLATFORM_IOS
+        const uint64_t requested_row_bytes = static_cast<uint64_t>(original_width) * bytes_per_pixel_requested;
+        const uint64_t stored_row_bytes = static_cast<uint64_t>(info.original_width) * bytes_per_pixel_in_store;
+        if (requested_row_bytes == stored_row_bytes && original_height <= info.original_height && data_delta == 0) {
+            LOG_WARN_ONCE("iOS possible typeless RT alias: address=0x{:X} guest={}x{} bpp={} "
+                          "cached={}x{} bpp={} row_bytes={} guest_format={} cache_format={} "
+                          "host_format={} stride={}/{} tiling={}/{}; keeping safe fallback",
+                address, original_width, original_height, bytes_per_pixel_requested,
+                info.original_width, info.original_height, bytes_per_pixel_in_store,
+                requested_row_bytes, static_cast<int>(base_format), static_cast<int>(info.format),
+                vk::to_string(info.texture.format), stride_bytes, info.stride_bytes,
+                static_cast<int>(tiling), static_cast<int>(info.tiling));
+        }
+#endif
         trace_color_lookup(ColorLookupPath::PartialTypeless, texture, base_format, &info);
         return std::nullopt;
     }
