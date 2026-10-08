@@ -739,6 +739,17 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             LOG_WARN_ONCE("Surface-as-texture: rejecting incompatible host typeless cast (src={}x{} {}B, dst={}x{} {}B)",
                 info.width, info.height, vk::blockSize(info.texture.format),
                 width, height, vk::blockSize(vk_format));
+#ifdef VITA3K_PLATFORM_IOS
+            // Keep a small sample of rejected casts: these never reach the
+            // copy-path diagnostics, yet may explain missing UI or character
+            // textures when the guest-memory fallback is stale.
+            static uint32_t ios_rejected_cast_count = 0;
+            if (ios_rejected_cast_count++ < 32) {
+                LOG_INFO("iOS rejected typeless cast address=0x{:X}", address);
+                LOG_INFO("iOS rejected source {}x{} row={} format={}", info.width, info.height, source_row_bytes, vk::to_string(info.texture.format));
+                LOG_INFO("iOS rejected destination {}x{} row={} format={}", width, height, destination_row_bytes, vk::to_string(vk_format));
+            }
+#endif
             return std::nullopt;
         }
     }
