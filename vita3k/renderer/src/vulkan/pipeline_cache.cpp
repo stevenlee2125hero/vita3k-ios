@@ -914,11 +914,7 @@ vk::Pipeline PipelineCache::compile_pipeline(SceGxmPrimitiveType type, vk::Rende
         };
         color_blending.setAttachments(blending);
     } else {
-        vk::PipelineColorBlendAttachmentState blending = fragment_program.blending;
-#ifdef VITA3K_PLATFORM_IOS
-        if (gxm::get_base_format(record.color_surface.colorFormat) == SCE_GXM_COLOR_BASE_FORMAT_F32F32)
-            blending.blendEnable = VK_FALSE;
-#endif
+        const vk::PipelineColorBlendAttachmentState &blending = fragment_program.blending;
         color_blending.setAttachments(blending);
     }
 

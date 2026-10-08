@@ -438,12 +438,7 @@ vk::Format translate_format(SceGxmColorBaseFormat format) {
     case SCE_GXM_COLOR_BASE_FORMAT_F16F16:
         return vk::Format::eR16G16Sfloat;
     case SCE_GXM_COLOR_BASE_FORMAT_F32F32:
-#ifdef VITA3K_PLATFORM_IOS
-        // Packed material words must survive NaN/subnormal encodings intact.
-        return vk::Format::eR32G32Uint;
-#else
         return vk::Format::eR32G32Sfloat;
-#endif
 
     case SCE_GXM_COLOR_BASE_FORMAT_U8U8U8U8:
         return vk::Format::eR8G8B8A8Unorm;

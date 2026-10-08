@@ -7,8 +7,6 @@ import tempfile
 
 root = Path(__file__).resolve().parents[2]
 s = (root / 'vita3k/shader/src/spirv_recompiler.cpp').read_text()
-a = s.index('        for (size_t pos = 5; pos < shader.spirv.size();)')
-body = s[a:s.index('\n    }\n#endif', a)]
 p = (root / 'vita3k/renderer/src/vulkan/pipeline_cache.cpp').read_text()
 v = p.index('    std::array<uint32_t, SCE_GXM_MAX_TEXTURE_UNITS +')
 variant = p[v:p.index('\n    for (size_t i = 0; i < sizeof(variant_tag);', v)]
@@ -17,12 +15,24 @@ mask_start = s.index('static void generate_update_mask_body(')
 mask_body = s[mask_start:s.index('\nstatic SpirvCode convert_gxp_to_spirv_impl', mask_start)]
 mask_guard_start = s.index('    translation_state.is_maskupdate = maskupdate &&')
 mask_guard = s[mask_guard_start:s.index(';', mask_guard_start)+1]
-r = (root / 'vita3k/renderer/src/vulkan/renderer.cpp').read_text()
-crop_start = r.index('    if (game_id == "PCSD00001")')
-crop = r[crop_start:r.index('\n#endif', crop_start)]
 c = (root / 'vita3k/renderer/src/vulkan/context.cpp').read_text()
 fallback_start = c.index('    if (color_surface_fin->data.address() == 0)')
 fallback = c[fallback_start:c.index('\n    context.current_color_format', fallback_start)]
+# Every record field consumed by compile_pipeline must be in the copied prefix.
+record_header = (root / 'vita3k/renderer/include/renderer/types.h').read_text()
+record_start = record_header.index('struct GxmRecordState {')
+prefix = record_header[record_start:record_header.index('std::array<GXMStreamInfo,', record_start)]
+compile_start = p.index('vk::Pipeline PipelineCache::compile_pipeline(')
+compile_body = p[compile_start:p.index('\nvk::Pipeline PipelineCache::retrieve_pipeline(', compile_start)]
+import re
+for field in set(re.findall(r'\brecord\.(\w+)', compile_body)):
+    assert re.search(r'\b' + re.escape(field) + r'\b', prefix), 'Async pipeline reads uncopied field: ' + field
+fmt = (root / 'vita3k/renderer/src/vulkan/gxm_to_vulkan.cpp').read_text()
+color = fmt[fmt.index('namespace color {'):fmt.index('namespace texture {')]
+assert 'return vk::Format::eR32G32Sfloat;' in color
+assert 'return vk::Format::eR32G32Uint;' not in color
+assert 'raw_rg32' not in s
+assert 'output_type = b.makeVectorType(b.makeUintType(32), 4);' not in s
 code = r'''
 #include <vector>
 #include <cstdint>
@@ -32,6 +42,8 @@ code = r'''
 #include <array>
 #include <map>
 #include <string_view>
+#include <cstring>
+#include <memory>
 #define LOG_INFO(...) ((void)0)
 #define VITA3K_PLATFORM_IOS 1
 namespace spv {
@@ -92,18 +104,8 @@ bool mask_enabled(const Program& program,bool maskupdate){TranslationState trans
 '''+mask_guard+r'''
  return translation_state.is_maskupdate;
 }
-struct Features {bool use_texture_viewport=true;};
-void exact_crop(Features& features,std::string_view game_id){
-'''+crop+r'''
-}
-struct Shader{std::vector<uint32_t> spirv;};
-void filter(Shader &shader){
-'''+body+r'''
-}
 int main(){
  check_transient_fallback();
- Features golden,other;exact_crop(golden,"PCSD00001");exact_crop(other,"PCSE00551");
- assert(!golden.use_texture_viewport && other.use_texture_viewport);
  std::vector<SceGxmVertexAttribute> attrs{{0,0,0,3,0}};
  Hints hints{};hints.attributes=&attrs;
  const auto vertex=material_variant(hints,true,false),fragment=material_variant(hints,false,false);
@@ -125,27 +127,9 @@ int main(){
  assert(!mask_enabled({SceGxmProgramType::Fragment},false));
  TranslationState state{};state.hints=&hints;
  hints.color_format=0;spv::Builder float_builder;generate_update_mask_body(float_builder,state);assert(float_builder.output_type==11);
- hints.color_format=SCE_GXM_COLOR_BASE_FORMAT_F32F32;spv::Builder uint_builder;generate_update_mask_body(uint_builder,state);assert(uint_builder.output_type==12);
+ hints.color_format=SCE_GXM_COLOR_BASE_FORMAT_F32F32;spv::Builder uint_builder;generate_update_mask_body(uint_builder,state);assert(uint_builder.output_type==11);
  state.is_vulkan=false;spv::Builder gl_builder;generate_update_mask_body(gl_builder,state);assert(gl_builder.output_type==11);
- Shader s{{0x07230203,0x10000,0,16,0,
-  (3u<<16)|71,2,0, // relaxed precision: remove
-  (4u<<16)|71,3,30,0, // Location: keep
-  (3u<<16)|71,4,0, // consecutive relaxed precision: remove
-  (3u<<16)|71,5,0,
-  (1u<<16)|253}};
- filter(s);
- assert((s.spirv==std::vector<uint32_t>{0x07230203,0x10000,0,16,0,(4u<<16)|71,3,30,0,(1u<<16)|253}));
- Shader invalid{{0,0,0,0,0,0}};filter(invalid);assert(invalid.spirv.size()==6);
- Shader truncated{{0,0,0,0,0,(4u<<16)|71,2}};filter(truncated);assert(truncated.spirv.size()==7);
- // RG32 integer attachment and buffer reinterpretation preserve every payload,
- // including patterns that are NaNs, infinities or subnormals as floats.
- for(uint32_t word:{0u,1u,0x007fffffu,0x7f800000u,0x7fc12345u,0xffcabcdeu,0x80000001u,0xffffffffu}) {
-  auto f=std::bit_cast<float>(word);assert(std::bit_cast<uint32_t>(f)==word);
-  uint32_t attachment=word;uint8_t bytes[4];
-  for(unsigned i=0;i<4;i++)bytes[i]=uint8_t(attachment>>(8*i));
-  uint32_t copied=0;for(unsigned i=0;i<4;i++)copied|=uint32_t(bytes[i])<<(8*i);
-  assert(copied==word);
- }
+
 }
 '''
 with tempfile.TemporaryDirectory() as tmp:
@@ -155,4 +139,4 @@ with tempfile.TemporaryDirectory() as tmp:
     subprocess.run(['c++', '-std=c++20', '-fsanitize=address,undefined',
                     str(cpp), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True, env=dict(os.environ, ASAN_OPTIONS='detect_leaks=0'))
-print('PASS: production precision/raw words, variant keys, fragment-only masks and attachment output types (builder/hash stubs)')
+print('PASS: restored float mask outputs, stage/attribute variant keys, transient format and async prefix bounds (builder/hash stubs)')

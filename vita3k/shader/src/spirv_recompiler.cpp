@@ -730,12 +730,7 @@ static void create_fragment_inputs(spv::Builder &b, SpirvShaderParameters &param
             // The GPU supports gl_LastFragData.
             // On Vulkan this is a subpass input, it is similar to gl_LastFragData (and should have the same speed on integrated GPUs)
             // This is not supported on OpenGL with SpirV
-            bool raw_rg32 = false;
-#ifdef VITA3K_PLATFORM_IOS
-            raw_rg32 = translation_state.is_vulkan && gxm::get_base_format(translation_state.hints->color_format) == SCE_GXM_COLOR_BASE_FORMAT_F32F32;
-#endif
-            const spv::Id input_scalar = raw_rg32 ? b.makeUintType(32) : f32;
-            const spv::Id image_type = b.makeImageType(input_scalar, spv::DimSubpassData, false, false, false, 2, spv::ImageFormatUnknown);
+            const spv::Id image_type = b.makeImageType(f32, spv::DimSubpassData, false, false, false, 2, spv::ImageFormatUnknown);
             const spv::Id last_frag_data = b.createVariable(precision, spv::StorageClassUniformConstant, image_type, "last_frag_data");
             b.addDecoration(last_frag_data, spv::DecorationInputAttachmentIndex, 0);
             if (translation_state.is_vulkan) {
@@ -747,14 +742,7 @@ static void create_fragment_inputs(spv::Builder &b, SpirvShaderParameters &param
             spv::Id coord_0 = b.makeIntConstant(0);
             const spv::Id ivec2 = b.makeVectorType(b.makeIntType(32), 2);
             coord_0 = b.makeCompositeConstant(ivec2, { coord_0, coord_0 });
-            source = b.createOp(spv::OpImageRead, raw_rg32 ? b.makeVectorType(input_scalar, 4) : v4, { b.createLoad(last_frag_data, spv::NoPrecision), coord_0 });
-            if (raw_rg32) {
-                source = b.createUnaryOp(spv::OpBitcast, v4, source);
-                // A two-channel float image supplies alpha=1. Integer images
-                // also supply integer 1, which must not become a subnormal
-                // float merely because the stored R/G words are bitcast.
-                source = b.createOp(spv::OpCompositeInsert, v4, { { true, b.makeFloatConstant(1.0f) }, { true, source }, { false, 3 } });
-            }
+            source = b.createOp(spv::OpImageRead, v4, { b.createLoad(last_frag_data, spv::NoPrecision), coord_0 });
             b.setPrecision(source, precision);
 
             translation_state.last_frag_data_id = last_frag_data;
@@ -1542,25 +1530,7 @@ static spv::Function *make_frag_finalize_function(spv::Builder &b, const SpirvSh
             b.createNoResultOp(spv::OpImageWrite, { b.createLoad(translate_state.color_attachment_raw_id, spv::NoPrecision), translated_id, color });
         }
     } else {
-        spv::Id output_type = b.makeVectorType(b.makeFloatType(32), 4);
-#ifdef VITA3K_PLATFORM_IOS
-        if (translate_state.is_vulkan && gxm::get_base_format(translate_state.hints->color_format) == SCE_GXM_COLOR_BASE_FORMAT_F32F32) {
-            // Load the register words directly, avoiding float attachment
-            // conversion/canonicalization of packed material bit patterns.
-            output_type = b.makeVectorType(b.makeUintType(32), 4);
-            if (color_val_operand.type == DataType::F32) {
-                Operand raw_operand = color_val_operand;
-                raw_operand.type = DataType::UINT32;
-                color = utils::load(b, parameters, utils, features, raw_operand, 0xF, reg_off);
-            } else {
-                // Numeric F16/normalized outputs still expand to float32
-                // values first; only the resulting RG32 storage is raw.
-                color = b.createUnaryOp(spv::OpBitcast, output_type, color);
-            }
-            precision = spv::NoPrecision;
-        }
-#endif
-        spv::Id out = b.createVariable(precision, spv::StorageClassOutput, output_type, "out_color");
+        spv::Id out = b.createVariable(precision, spv::StorageClassOutput, b.makeVectorType(b.makeFloatType(32), 4), "out_color");
         translate_state.interfaces.push_back(out);
         b.addDecoration(out, spv::DecorationLocation, 0);
         b.createStore(color, out);
@@ -1850,16 +1820,8 @@ static void generate_update_mask_body(spv::Builder &b, TranslationState &transla
     const spv::Id writing_mask_var = utils::create_access_chain(b, spv::StorageClassUniform, translate_state.render_info_id, { b.makeIntConstant(FRAG_UNIFORM_writing_mask) });
     const spv::Id writing_mask = b.createLoad(writing_mask_var, spv::NoPrecision);
 
-    spv::Id v4 = b.makeVectorType(b.makeFloatType(32), 4);
-    spv::Id mask_v = b.createCompositeConstruct(v4, { writing_mask, writing_mask, writing_mask, writing_mask });
-#ifdef VITA3K_PLATFORM_IOS
-    if (translate_state.is_vulkan && gxm::get_base_format(translate_state.hints->color_format) == SCE_GXM_COLOR_BASE_FORMAT_F32F32) {
-        // Metal requires integer fragment outputs for integer attachments,
-        // including the separate mask-update shader body.
-        v4 = b.makeVectorType(b.makeUintType(32), 4);
-        mask_v = b.createUnaryOp(spv::OpBitcast, v4, mask_v);
-    }
-#endif
+    const spv::Id v4 = b.makeVectorType(b.makeFloatType(32), 4);
+    const spv::Id mask_v = b.createCompositeConstruct(v4, { writing_mask, writing_mask, writing_mask, writing_mask });
 
     const spv::Id out = b.createVariable(spv::NoPrecision, spv::StorageClassOutput, v4, "out_color");
     translate_state.interfaces.push_back(out);
@@ -2125,23 +2087,6 @@ GeneratedShader convert_gxp(const SceGxmProgram &program, const std::string &sha
 
     GeneratedShader shader{};
     shader.spirv = convert_gxp_to_spirv_impl(program, shader_hash, features, translation_state, force_shader_debug, dumper);
-#ifdef VITA3K_PLATFORM_IOS
-    if (translation_state.is_vulkan) {
-        // Guest F16 packing is explicit in USSE helpers. Metal must not lower
-        // the intervening 32-bit register math or bitcasts to half precision.
-        for (size_t pos = 5; pos < shader.spirv.size();) {
-            const uint32_t count = shader.spirv[pos] >> 16;
-            const uint32_t op = shader.spirv[pos] & 0xFFFF;
-            if (count == 0 || pos + count > shader.spirv.size())
-                break;
-            if (op == spv::OpDecorate && count >= 3 && shader.spirv[pos + 2] == spv::DecorationRelaxedPrecision) {
-                shader.spirv.erase(shader.spirv.begin() + pos, shader.spirv.begin() + pos + count);
-            } else {
-                pos += count;
-            }
-        }
-    }
-#endif
 
     if (translation_state.is_target_glsl) {
         // also generate the glsl file
