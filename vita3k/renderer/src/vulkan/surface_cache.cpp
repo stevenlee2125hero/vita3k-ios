@@ -774,6 +774,10 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     const bool needs_typeless_buffer = bytes_per_pixel_requested != bytes_per_pixel_in_store
         || vk::blockSize(info.texture.format) != vk::blockSize(vk_format);
     if (needs_typeless_buffer && !byte_equivalent_linear_alias) {
+        // A staging-buffer reinterpretation preserves bytes, not pixel
+        // values. Different Vulkan texel footprints require equal byte
+        // spans on every row; otherwise the destination samples shifted
+        // or unrelated texels (often visible as colored stripes).
         const uint64_t source_row_bytes = static_cast<uint64_t>(info.width) * vk::blockSize(info.texture.format);
         const uint64_t destination_row_bytes = static_cast<uint64_t>(width) * vk::blockSize(vk_format);
         if (source_row_bytes != destination_row_bytes || info.height != height || start_x != 0 || start_sourced_line != 0) {
