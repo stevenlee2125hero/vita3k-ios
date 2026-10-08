@@ -9,6 +9,10 @@ on:
       - 'vita3k/renderer/src/vulkan/creation.cpp'
       - 'vita3k/renderer/src/vulkan/scene.cpp'
       - 'vita3k/renderer/include/renderer/vulkan/types.h'
+      - 'vita3k/shader/**'
+      - 'vita3k/renderer/src/vulkan/gxm_to_vulkan.cpp'
+      - 'vita3k/renderer/src/vulkan/renderer.cpp'
+      - 'vita3k/renderer/src/vulkan/pipeline_cache.cpp'
       - 'tools/render-regression/**'
       - '.github/workflows/render-regression.yml'
   pull_request:
@@ -20,6 +24,10 @@ on:
       - 'vita3k/renderer/src/vulkan/creation.cpp'
       - 'vita3k/renderer/src/vulkan/scene.cpp'
       - 'vita3k/renderer/include/renderer/vulkan/types.h'
+      - 'vita3k/shader/**'
+      - 'vita3k/renderer/src/vulkan/gxm_to_vulkan.cpp'
+      - 'vita3k/renderer/src/vulkan/renderer.cpp'
+      - 'vita3k/renderer/src/vulkan/pipeline_cache.cpp'
       - 'tools/render-regression/**'
       - '.github/workflows/render-regression.yml'
 jobs:
@@ -35,3 +43,5 @@ jobs:
         run: python3 tools/render-regression/check_u2f10_upload.py
       - name: Test observed RT aliases and feedback command ordering
         run: python3 tools/render-regression/check_rt_alias_feedback.py
+      - name: Test strict shader precision and packed material words
+        run: python3 tools/render-regression/check_material_accuracy.py

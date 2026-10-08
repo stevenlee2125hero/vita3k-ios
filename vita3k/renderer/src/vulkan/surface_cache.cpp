@@ -574,6 +574,12 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
 
     const vk::ComponentMapping swizzle = texture::translate_swizzle(gxm::get_format(texture));
     vk::Format vk_format = color::translate_format(base_format);
+#ifdef VITA3K_PLATFORM_IOS
+    // Rendered RG32 words use integer storage; numeric guest F32 sampling
+    // uses a float image populated by a byte-preserving buffer copy.
+    if (base_format == SCE_GXM_COLOR_BASE_FORMAT_F32F32)
+        vk_format = vk::Format::eR32G32Sfloat;
+#endif
 
     const bool is_srgb = texture.gamma_mode != 0;
     if (is_srgb) {
@@ -735,7 +741,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         && static_cast<uint64_t>(original_width) == static_cast<uint64_t>(info.original_width) * 2
         && bytes_per_pixel_requested == 4 && bytes_per_pixel_in_store == 8
         && stride_bytes == info.stride_bytes
-        && info.texture.format == vk::Format::eR32G32Sfloat
+        && (info.texture.format == vk::Format::eR32G32Sfloat || info.texture.format == vk::Format::eR32G32Uint)
         && (vk_format == vk::Format::eR8G8B8A8Unorm || vk_format == vk::Format::eR8G8B8A8Srgb || vk_format == vk::Format::eR8G8B8A8Snorm)
         && static_cast<uint64_t>(original_width) * 4 == static_cast<uint64_t>(info.original_width) * 8;
     if (partial_surface && bytes_per_pixel_requested != bytes_per_pixel_in_store && !byte_equivalent_linear_alias) {
@@ -761,7 +767,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
 #ifdef VITA3K_PLATFORM_IOS
     // Sampling a bound color attachment is not an ordinary sampled-image
     // dependency on Metal. Snapshot it after the preceding draws instead.
-    can_use_viewport = can_use_viewport && !is_same_image;
+    can_use_viewport = can_use_viewport && !is_same_image && info.texture.format != vk::Format::eR32G32Uint;
 #endif
     if (can_use_viewport) {
         trace_color_lookup(is_same_image ? ColorLookupPath::FeedbackViewport : ColorLookupPath::Viewport,
@@ -825,7 +831,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         }
     }
 
-    if (is_same_image || (start_sourced_line != 0) || (start_x != 0) || (info.width != width) || (info.height != height) || (info.format != base_format)) {
+    if (is_same_image || (start_sourced_line != 0) || (start_x != 0) || (info.width != width) || (info.height != height) || (info.format != base_format) || (info.texture.format != vk_format)) {
         VKContext *context = reinterpret_cast<VKContext *>(state.context);
 #ifdef VITA3K_PLATFORM_IOS
         if (is_same_image && context->has_rendered_in_recording) {

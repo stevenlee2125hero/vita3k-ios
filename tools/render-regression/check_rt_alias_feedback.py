@@ -25,8 +25,8 @@ code = r'''
 #include <vector>
 #define VITA3K_PLATFORM_IOS 1
 namespace vk { using DeviceSize=uint64_t; enum class Format {
- eR32G32Sfloat,eR8G8B8A8Unorm,eR8G8B8A8Srgb,eR8G8B8A8Snorm,eR16G16B16A16Sfloat};
- unsigned blockSize(Format f){return f==Format::eR32G32Sfloat||f==Format::eR16G16B16A16Sfloat?8:4;}
+ eR32G32Sfloat,eR32G32Uint,eR8G8B8A8Unorm,eR8G8B8A8Srgb,eR8G8B8A8Snorm,eR16G16B16A16Sfloat};
+ unsigned blockSize(Format f){return f==Format::eR32G32Sfloat||f==Format::eR32G32Uint||f==Format::eR16G16B16A16Sfloat?8:4;}
 }
 enum class SurfaceTiling { Linear,Tiled };
 struct Info {SurfaceTiling tiling=SurfaceTiling::Linear;unsigned original_width=720,original_height=408,stride_bytes=5760;
@@ -79,6 +79,9 @@ int main(){
  }
  Info expanded;expanded.texture.format=vk::Format::eR16G16B16A16Sfloat;
  assert(!alias(expanded,state,4,vk::Format::eR8G8B8A8Snorm));
+ Info raw;raw.texture.format=vk::Format::eR32G32Uint;
+ assert(alias(raw,state,0,vk::Format::eR8G8B8A8Unorm));
+ assert(alias(raw,state,4,vk::Format::eR8G8B8A8Snorm));
  // Emulate the Vulkan buffer copies with byte-distinct rows, preserving raw
  // float bits (no numeric conversion), row crossing and the last +4 tail.
  for(unsigned h:{1u,2u,408u})for(unsigned start_x:{0u,1u}) {

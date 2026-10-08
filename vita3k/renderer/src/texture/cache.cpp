@@ -489,6 +489,7 @@ void TextureCache::upload_texture(const SceGxmTexture &gxm_texture, MemState &me
             pixels = texture_data_decompressed.data();
             upload_format = SCE_GXM_TEXTURE_BASE_FORMAT_U8U8U8U8;
             bpp = 32;
+            bytes_per_pixel = 4;
             break;
         case SCE_GXM_TEXTURE_BASE_FORMAT_SE5M9M9M9:
             // this format is supported on all GPUs with vulkan
@@ -550,6 +551,7 @@ void TextureCache::upload_texture(const SceGxmTexture &gxm_texture, MemState &me
             pixels = texture_data_decompressed.data();
             bpp = 32;
             upload_format = SCE_GXM_TEXTURE_BASE_FORMAT_U8U8U8U8;
+            bytes_per_pixel = 4;
             break;
         default:
             break;

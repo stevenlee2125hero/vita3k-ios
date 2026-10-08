@@ -154,3 +154,32 @@ the actual game's colors restored. A full upstream-core build is required.
 
 Only the combined log-guided candidate is to be delivered after complete build
 and self-audit; intermediate edits are not device-install requests.
+
+## Material accuracy v14 after third device rejection
+
+The 00:07 session identifies merge b860dae (61e21b3d). Offset SNORM aliases
+and feedback snapshots execute, but the character remains corrupted. The user
+also reports darker scenery. Those paths cannot be claimed as the main fix.
+
+This candidate addresses the representation before the copies: iOS RG32 render
+attachments use R32G32Uint, and fragment output loads UINT32 register words
+directly. Packed material data must not undergo a floating-point attachment
+conversion that can canonicalize NaN encodings or flush subnormal payloads.
+Subpass framebuffer reads use unsigned images followed by a bitcast. Numeric
+F32 texture sampling obtains a float image via a raw buffer copy. Integer
+attachments disable fixed-function blending; guest shader framebuffer reads
+remain available. This wider iOS representation change remains unverified
+in Golden Abyss until the candidate actually runs on the device.
+
+Metal fast math is disabled; generated Vulkan SPIR-V removes RelaxedPrecision
+decorations so explicit guest packing retains full 32-bit intermediate math.
+Shader/pipeline cache version advances to 14, automatically excluding old
+compiled shaders. The approximate texture viewport is disabled on iOS in favor
+of explicit GPU crops, with the already-tested command order and depth retention.
+U8U3U3U2 and YUV expansion now update bytes_per_pixel to match their RGBA8 layout.
+
+Potential cost: additional copies, full precision and retained depth can reduce
+performance. No game files, boot, language/font, save or controller code changes.
+The candidate must pass all host regression suites and a real arm64 iOS build
+before the user's requested final device comparison. These checks cannot prove
+the remaining character corruption eliminated.

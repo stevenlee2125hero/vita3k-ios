@@ -474,11 +474,17 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
 #ifdef __APPLE__
         const VkBool32 full_image_swizzle = VK_TRUE;
         const VkBool32 resume_lost_device = VK_TRUE;
+#ifdef VITA3K_PLATFORM_IOS
+        const int32_t strict_fast_math = 0;
+#endif
 #ifndef NDEBUG
         const VkBool32 debug = VK_TRUE;
         const int32_t log_level = 4;
 #endif
         vk::LayerSettingEXT layer_settings[] = {
+#ifdef VITA3K_PLATFORM_IOS
+            { kMVKMoltenVKDriverLayerName, "MVK_CONFIG_FAST_MATH_ENABLED", vk::LayerSettingTypeEXT::eInt32, 1, &strict_fast_math },
+#endif
             { kMVKMoltenVKDriverLayerName, "MVK_CONFIG_FULL_IMAGE_VIEW_SWIZZLE", vk::LayerSettingTypeEXT::eBool32, 1,
                 &full_image_swizzle },
             { kMVKMoltenVKDriverLayerName, "MVK_CONFIG_RESUME_LOST_DEVICE", vk::LayerSettingTypeEXT::eBool32, 1,
@@ -966,6 +972,12 @@ void VKState::late_init(const Config &cfg, const std::string_view game_id, MemSt
     } else if (use_high_accuracy) {
         LOG_INFO("High accuracy enabled: texture viewport disabled");
     }
+#ifdef VITA3K_PLATFORM_IOS
+    // Material atlases need the exact guest crop, wrap and texel footprint.
+    // Prefer explicit GPU copies over the approximate viewport optimization.
+    features.use_texture_viewport = false;
+    LOG_INFO("iOS material accuracy v14: integer RG32 storage, strict float math, exact texture crops, fresh shader cache");
+#endif
 
     // parse the mapping method
     auto &config_mapping = cfg.current_config.memory_mapping;
