@@ -822,7 +822,12 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
                 vk::PipelineStageFlagBits::eTransfer, {}, clear_barrier, {}, {});
         }
 
-        if (bytes_per_pixel_requested == bytes_per_pixel_in_store) {
+        // Vulkan image-to-image copies require compatible texel block sizes.
+        // A Vita guest format can occupy the same bytes as another guest
+        // format while its expanded host image uses a different block size.
+        // Route those cases through the buffer-based reinterpretation path.
+        const bool host_copy_compatible = vk::blockSize(info.texture.format) == vk::blockSize(vk_format);
+        if (bytes_per_pixel_requested == bytes_per_pixel_in_store && host_copy_compatible) {
             trace_color_lookup(ColorLookupPath::Copy, texture, base_format, &info);
             const uint32_t copy_width = std::min(width, info.width - start_x);
             const uint32_t copy_height = std::min(height, info.height - start_sourced_line);
