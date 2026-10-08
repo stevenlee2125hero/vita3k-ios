@@ -920,7 +920,10 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             const vk::DeviceSize destination_offset = static_cast<vk::DeviceSize>(start_x) * vk::blockSize(vk_format);
             const vk::DeviceSize source_span = source_row_bytes * align(height, 4);
             const vk::DeviceSize destination_span = destination_row_bytes * align(height, 4) + destination_offset;
-            const vk::DeviceSize buffer_size = std::max(source_span, destination_span);
+            // vkCmdFillBuffer requires a 4-byte-aligned size. The same
+            // allocation is reused for partial-surface clears and image
+            // transfers, so round its capacity up before either operation.
+            const vk::DeviceSize buffer_size = (std::max(source_span, destination_span) + 3) & ~vk::DeviceSize(3);
             if (!casted->transition_buffer.buffer || casted->transition_buffer.size < buffer_size) {
                 // create or re-create the buffer
                 state.frame().destroy_queue.add_buffer(casted->transition_buffer);
