@@ -656,6 +656,16 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         return std::nullopt;
     }
 
+    // Vulkan buffer-image copies require bufferRowLength >= imageExtent.width.
+    // Some guest surface pitches describe fewer texels than the expanded
+    // host image width. Such surfaces cannot be safely reinterpreted using
+    // the existing staging copy, regardless of matching guest byte sizes.
+    const uint64_t host_source_row_texels = static_cast<uint64_t>(info.stride_bytes / bytes_per_pixel_in_store) * state.res_multiplier;
+    if (host_source_row_texels < info.width) {
+        trace_color_lookup(ColorLookupPath::TilingStride, texture, base_format, &info);
+        return std::nullopt;
+    }
+
     // A byte offset within a tiled or Morton-swizzled image does not
     // correspond to a linear (row, column) offset. The calculation below
     // is only valid for linear surfaces. Reject offset subviews of other
