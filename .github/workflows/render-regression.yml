@@ -1,0 +1,19 @@
+name: Render decoder regression
+on:
+  push:
+    paths:
+      - 'vita3k/renderer/src/texture/format.cpp'
+      - 'tools/render-regression/**'
+      - '.github/workflows/render-regression.yml'
+  pull_request:
+    paths:
+      - 'vita3k/renderer/src/texture/format.cpp'
+      - 'tools/render-regression/**'
+      - '.github/workflows/render-regression.yml'
+jobs:
+  bc-decoder:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test production decoder under address and undefined-behavior sanitizers
+        run: python3 tools/render-regression/check_bc_decoder.py

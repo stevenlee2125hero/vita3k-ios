@@ -805,10 +805,17 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         std::vector<CastedTexture> &casted_vec = info.casted_textures;
 
         CastedTexture *casted = nullptr;
+        // The sampled view's mapping is immutable. Include it in the cache
+        // identity even when the guest address, crop and base format match.
+        const bool same_component_layout = bytes_per_pixel_requested == bytes_per_pixel_in_store
+            && vk::componentCount(info.texture.format) == vk::componentCount(vk_format);
+        const vk::ComponentMapping resulting_swizzle = same_component_layout
+            ? vkutil::color_to_texture_swizzle(info.swizzle, swizzle)
+            : swizzle;
 
         // Look in cast cache and grab one. The cache really does not store immediate grab on now, but rather to reduce the synchronization in the pipeline (use different texture)
         for (size_t i = 0; i < casted_vec.size();) {
-            if ((casted_vec[i].cropped_height == height) && (casted_vec[i].cropped_width == width) && (casted_vec[i].cropped_y == start_sourced_line) && (casted_vec[i].cropped_x == start_x) && (casted_vec[i].format == base_format) && (casted_vec[i].texture.format == vk_format)) {
+            if ((casted_vec[i].cropped_height == height) && (casted_vec[i].cropped_width == width) && (casted_vec[i].cropped_y == start_sourced_line) && (casted_vec[i].cropped_x == start_x) && (casted_vec[i].format == base_format) && (casted_vec[i].texture.format == vk_format) && (casted_vec[i].components == resulting_swizzle)) {
                 casted = &casted_vec[i];
 
                 if (!is_same_image && casted->scene_timestamp == scene_timestamp) {
@@ -844,22 +851,12 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
                 .cropped_y = start_sourced_line,
                 .cropped_width = width,
                 .cropped_height = height,
-                .format = base_format
+                .format = base_format,
+                .components = resulting_swizzle
             };
             casted->texture.width = width;
             casted->texture.height = height;
             casted->texture.format = vk_format;
-
-            // find the swizzle we need to apply
-            const std::uint8_t components_in_store = vk::componentCount(info.texture.format);
-            const std::uint8_t components_requested = vk::componentCount(vk_format);
-            vk::ComponentMapping resulting_swizzle;
-            // Only take into consideration the current swizzle when it makes sense
-            // (Not perfect but better than doing this all the time)
-            if (bytes_per_pixel_requested == bytes_per_pixel_in_store && components_in_store == components_requested)
-                resulting_swizzle = vkutil::color_to_texture_swizzle(info.swizzle, swizzle);
-            else
-                resulting_swizzle = swizzle;
 
             casted->texture.init_image(vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst, resulting_swizzle);
             casted->texture.transition_to(cmd_buffer, vkutil::ImageLayout::TransferDst);
@@ -1878,19 +1875,11 @@ vk::ImageView VKSurfaceCache::sourcing_color_surface_for_presentation(Ptr<const 
             if (info.swizzle == vkutil::rgba_mapping && info.texture.format == vk::Format::eR8G8B8A8Unorm)
                 return info.texture.view;
 
-            if (!info.alternate_view) {
-                // create a view with the right swizzle and without gamma correction
-                vk::ImageViewCreateInfo view_info{
-                    .image = info.texture.image,
-                    .viewType = vk::ImageViewType::e2D,
-                    .format = vk::Format::eR8G8B8A8Unorm,
-                    .components = vkutil::color_to_texture_swizzle(info.swizzle, vkutil::rgba_mapping),
-                    .subresourceRange = vkutil::color_subresource_range
-                };
-                info.alternate_view = state.device.createImageView(view_info);
-            }
-
-            return info.alternate_view;
+            // Framebuffer gamma views and presentation channel mappings
+            // must not share alternate_view: it may already hold an identity
+            // attachment view created while switching linear/sRGB rendering.
+            return retrieve_sampled_view(info, vk::Format::eR8G8B8A8Unorm,
+                vkutil::color_to_texture_swizzle(info.swizzle, vkutil::rgba_mapping));
         }
     }
 
