@@ -862,6 +862,18 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             cmd_buffer.copyImage(info.texture.image, vk::ImageLayout::eGeneral, casted->texture.image, vk::ImageLayout::eTransferDstOptimal, image_copy);
         } else {
             LOG_INFO_ONCE("Game is doing typeless copies");
+#ifdef VITA3K_PLATFORM_IOS
+            // Capture the precise guest/host layout of problematic texture
+            // reinterpretations before changing the scene rendering path.
+            // These details distinguish character material corruption from
+            // the known full-width Golden Abyss render-target alias.
+            LOG_INFO("iOS typeless surface cast addr=0x{:X} source={}x{} guest={}B host={}B vk={} destination={}x{} guest={}B host={}B vk={} offset={},{} row_src={} row_dst={} alias={}",
+                address, info.width, info.height, bytes_per_pixel_in_store,
+                vk::blockSize(info.texture.format), vk::to_string(info.texture.format),
+                width, height, bytes_per_pixel_requested, vk::blockSize(vk_format),
+                vk::to_string(vk_format), start_x, start_sourced_line,
+                info.stride_bytes, stride_bytes, byte_equivalent_linear_alias);
+#endif
             trace_color_lookup(ColorLookupPath::TypelessCopy, texture, base_format, &info);
             // We must use a transition buffer
             // The intermediate buffer contains the raw bytes of the host
