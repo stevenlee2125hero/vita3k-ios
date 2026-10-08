@@ -651,34 +651,34 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         return std::nullopt;
     }
 
-    // The typeless conversion path uses a row-strided transition buffer and
-    // cannot safely synthesize texels outside the cached surface.
-    if (partial_surface && bytes_per_pixel_requested != bytes_per_pixel_in_store) {
-        // A wider guest texture can occupy exactly the same bytes as a
-        // narrower render target (e.g. 1440x4 versus 720x8).  Do not
-        // mistake that for proof that a Vulkan image copy is safe: the
-        // cached host format may have a different byte size from the
-        // guest surface format (notably U2F10F10F10 -> RGBA16F).
-        // Record the byte-equivalent cases so an on-device log can
-        // distinguish a valid guest alias from an actual out-of-bounds
-        // request before changing the typeless conversion path.
-#ifdef VITA3K_PLATFORM_IOS
-        const uint64_t requested_row_bytes = static_cast<uint64_t>(original_width) * bytes_per_pixel_requested;
-        const uint64_t stored_row_bytes = static_cast<uint64_t>(info.original_width) * bytes_per_pixel_in_store;
-        if (requested_row_bytes == stored_row_bytes && original_height <= info.original_height && data_delta == 0) {
-            LOG_WARN_ONCE("iOS possible typeless RT alias: address=0x{:X} guest={}x{} bpp={} "
-                          "cached={}x{} bpp={} row_bytes={} guest_format={} cache_format={} "
-                          "host_format={} stride={}/{} tiling={}/{}; keeping safe fallback",
-                address, original_width, original_height, bytes_per_pixel_requested,
-                info.original_width, info.original_height, bytes_per_pixel_in_store,
-                requested_row_bytes, static_cast<int>(base_format), static_cast<int>(info.format),
-                vk::to_string(info.texture.format), stride_bytes, info.stride_bytes,
-                static_cast<int>(tiling), static_cast<int>(info.tiling));
-        }
-#endif
+    // Some Vita games reinterpret a GPU render target through a narrower
+    // guest texture format.  The pixel widths then differ even though the
+    // byte span is identical (Golden Abyss: RG32F 720x408 -> RGBA8 1440x408).
+    // Restrict this fast path to the observed, byte-compatible *host* formats,
+    // linear full-surface aliases and native resolution.  Other cases still
+    // take the safe fallback: in particular guest U2F10F10F10 surfaces
+    // expanded to host RGBA16F must not be treated as raw 32-bit bytes.
+    const bool byte_equivalent_linear_alias =
+        data_delta == 0 && state.res_multiplier == 1
+        && tiling == SurfaceTiling::Linear && info.tiling == SurfaceTiling::Linear
+        && start_x == 0 && start_sourced_line == 0
+        && original_height == info.original_height
+        && original_width == info.original_width * 2
+        && bytes_per_pixel_requested == 4 && bytes_per_pixel_in_store == 8
+        && stride_bytes == info.stride_bytes
+        && info.texture.format == vk::Format::eR32G32Sfloat
+        && (vk_format == vk::Format::eR8G8B8A8Unorm || vk_format == vk::Format::eR8G8B8A8Srgb)
+        && static_cast<uint64_t>(original_width) * 4 == static_cast<uint64_t>(info.original_width) * 8;
+    if (partial_surface && bytes_per_pixel_requested != bytes_per_pixel_in_store && !byte_equivalent_linear_alias) {
         trace_color_lookup(ColorLookupPath::PartialTypeless, texture, base_format, &info);
         return std::nullopt;
     }
+#ifdef VITA3K_PLATFORM_IOS
+    if (byte_equivalent_linear_alias) {
+        LOG_INFO_ONCE("iOS RT byte-equivalent linear alias: address=0x{:X} RG32F {}x{} -> RGBA8 {}x{}, row={} bytes",
+            address, info.original_width, info.original_height, original_width, original_height, stride_bytes);
+    }
+#endif
 
     // We should be able to use this texture, so set it as mru
     color_surface_queue.set_as_mru(&info);
@@ -799,7 +799,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader | vk::PipelineStageFlagBits::eTransfer,
             vk::PipelineStageFlagBits::eTransfer, {}, {}, {}, source_barrier);
 
-        if (partial_surface) {
+        if (partial_surface && !byte_equivalent_linear_alias) {
             const vk::ClearColorValue clear_color{ std::array<float, 4>({ 0.0f, 0.0f, 0.0f, 0.0f }) };
             cmd_buffer.clearColorImage(casted->texture.image, vk::ImageLayout::eTransferDstOptimal,
                 clear_color, vkutil::color_subresource_range);
