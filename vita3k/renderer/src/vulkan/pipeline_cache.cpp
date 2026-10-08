@@ -464,7 +464,20 @@ static const vk::SpecializationInfo srgb_info_false = {
     .pData = &srgb_entry_false
 };
 
-vk::PipelineShaderStageCreateInfo PipelineCache::retrieve_shader(const SceGxmProgram *program, const Sha256Hash &hash, bool is_vertex, bool maskupdate, MemState &mem, const shader::Hints &hints, bool is_srgb) {
+vk::PipelineShaderStageCreateInfo PipelineCache::retrieve_shader(const SceGxmProgram *program, const Sha256Hash &program_hash, bool is_vertex, bool maskupdate, MemState &mem, const shader::Hints &hints, bool is_srgb) {
+    Sha256Hash hash = program_hash;
+#ifdef VITA3K_PLATFORM_IOS
+    // Output format and sampled texture formats affect generated SPIR-V.
+    // A program-only key can silently reuse a different material variant.
+    std::array<uint32_t, SCE_GXM_MAX_TEXTURE_UNITS + 2> variant_data{};
+    variant_data[0] = is_vertex ? 0 : static_cast<uint32_t>(hints.color_format);
+    variant_data[1] = maskupdate ? 1 : 0;
+    for (size_t i = 0; i < SCE_GXM_MAX_TEXTURE_UNITS; i++)
+        variant_data[i + 2] = static_cast<uint32_t>(is_vertex ? hints.vertex_textures[i] : hints.fragment_textures[i]);
+    const uint64_t variant_tag = XXH64(variant_data.data(), sizeof(variant_data), 0);
+    for (size_t i = 0; i < sizeof(variant_tag); i++)
+        hash[i] ^= static_cast<uint8_t>(variant_tag >> (8 * i));
+#endif
     if (maskupdate)
         LOG_WARN_ONCE("Mask not implemented in the vulkan renderer!");
 
@@ -497,7 +510,9 @@ vk::PipelineShaderStageCreateInfo PipelineCache::retrieve_shader(const SceGxmPro
     }
 
     if (*shader_module == shader_compiling) {
+#ifndef VITA3K_PLATFORM_IOS
         precompile_shader(hash, false);
+#endif
     }
 
     if (*shader_module != shader_compiling) {
@@ -513,7 +528,10 @@ vk::PipelineShaderStageCreateInfo PipelineCache::retrieve_shader(const SceGxmPro
     const std::string hash_text = hex_string(hash);
 
     LOG_INFO("Generating vulkan spv shader {}", hash_text);
-    const std::string shader_version = fmt::format("vk{}", shader::CURRENT_VERSION);
+    std::string shader_version = fmt::format("vk{}", shader::CURRENT_VERSION);
+#ifdef VITA3K_PLATFORM_IOS
+    shader_version += fmt::format("-variant{:016X}", variant_tag);
+#endif
 
     shader::usse::SpirvCode source = load_spirv_shader(*program, state.features, true, hints, maskupdate, state.shaders_path, state.shaders_log_path, shader_version, true);
 

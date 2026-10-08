@@ -178,6 +178,12 @@ compiled shaders. The approximate texture viewport is disabled on iOS in favor
 of explicit GPU crops, with the already-tested command order and depth retention.
 U8U3U3U2 and YUV expansion now update bytes_per_pixel to match their RGBA8 layout.
 
+Self-audit also corrected shader identity: memory modules and disk shader files
+include output format, sampled texture formats and mask mode. A program-only
+cache could reuse SPIR-V for a different material layout or float/integer output.
+Legacy precompile-by-program-hash is bypassed for these iOS variants; on-demand
+loading still uses the new per-variant disk cache.
+
 Potential cost: additional copies, full precision and retained depth can reduce
 performance. No game files, boot, language/font, save or controller code changes.
 The candidate must pass all host regression suites and a real arm64 iOS build
