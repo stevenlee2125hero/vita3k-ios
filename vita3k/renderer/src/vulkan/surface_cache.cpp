@@ -618,7 +618,10 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     // valid and feed an out-of-range region into the Vulkan copy path.
     const uint64_t requested_end = static_cast<uint64_t>(address) + total_surface_size;
     const uint64_t cached_end = static_cast<uint64_t>(ite->first) + info.total_bytes + 4;
-    const bool addr_in_range_of_cache = requested_end <= cached_end;
+    // The texture must begin within the cached surface as well as end
+    // within its range. An end-only test accepts an unrelated lower address
+    // whenever its requested byte span happens to end before cached_end.
+    const bool addr_in_range_of_cache = static_cast<uint64_t>(address) >= ite->first && requested_end <= cached_end;
 
     if (ite->first != address && !addr_in_range_of_cache) {
         // persona 4 sample from the top of a texture while the bottom wasn't rendered to, the fact that both the surface and
