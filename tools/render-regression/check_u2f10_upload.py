@@ -14,6 +14,8 @@ s = (root / 'vita3k/renderer/src/texture/cache.cpp').read_text()
 a = s.index('        case SCE_GXM_TEXTURE_BASE_FORMAT_U2F10F10F10:')
 b = s.index('        case SCE_GXM_TEXTURE_BASE_FORMAT_X8U24:', a)
 selection = s[a:b]
+assert 'bpp = guest_bpp;' in s[s.index('    while (face_uploaded_count'):s.index('        // perform all needed conversions')]
+assert 'bytes_per_pixel = (guest_bpp + 7) >> 3;' in s[s.index('    while (face_uploaded_count'):s.index('        // perform all needed conversions')]
 code = r'''
 #include <cstdint>
 #include <array>
@@ -33,6 +35,7 @@ int main(){
  // Integer format availability must NEVER select raw packed-float upload.
  for(bool support_a2rgb10 : {false,true})for(int fmt=0;fmt<8;++fmt){
   bool is_vulkan=true;uint32_t pixels_per_stride=8,memory_height=3;
+  uint32_t bpp=32,bytes_per_pixel=4;
   // F10 values 1, 2, 0.5 and 2-bit alpha=1 in both packed alpha layouts.
   uint32_t packed=fmt<4 ? (3u<<30)|480u|(512u<<10)|(448u<<20)
                          : 3u|(480u<<2)|(512u<<12)|(448u<<22);
@@ -44,6 +47,7 @@ int main(){
 '''+selection+r'''
   }
   assert(upload_format==SCE_GXM_TEXTURE_BASE_FORMAT_F16F16F16F16);
+  assert(bpp==64 && bytes_per_pixel==8);
   assert(texture_data_decompressed.size()==pixels_per_stride*memory_height*8);
   assert(pixels==texture_data_decompressed.data());
   const uint16_t upper[4]={0x3c00,0x4000,0x3800,0x3c00};

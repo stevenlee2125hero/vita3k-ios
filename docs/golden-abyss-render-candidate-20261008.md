@@ -98,3 +98,13 @@ This candidate needs a full upstream-core build and one device comparison.
 If corruption persists, collect the existing Share log file output from the same
 session; do not infer another root cause solely from screenshots. Packed-float
 surface aliases and same-pass feedback remain separate unverified paths.
+
+
+Follow-through audit of that conversion also found that generic swizzle/tile
+processing retained the original 32-bit texel size after expanding to 64-bit
+RGBA16F. The conversion now sets bpp=64 and bytes_per_pixel=8 so layout
+processing preserves complete host texels. Guest bpp is restored at the start
+of every mip/face, keeping source stride/advance calculations independent of
+previous host expansion. The production-branch regression asserts the expanded
+layout metadata as well as the decoded bytes. The first entry-only correction
+b1c8435e is superseded before device delivery.

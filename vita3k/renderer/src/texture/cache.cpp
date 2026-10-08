@@ -346,7 +346,8 @@ void TextureCache::upload_texture(const SceGxmTexture &gxm_texture, MemState &me
     const void *pixels = nullptr;
 
     uint32_t pixels_per_stride = 0;
-    uint32_t bpp = gxm::bits_per_pixel(base_format);
+    const uint32_t guest_bpp = gxm::bits_per_pixel(base_format);
+    uint32_t bpp = guest_bpp;
     uint32_t bytes_per_pixel = (bpp + 7) >> 3;
 
     const auto texture_type = gxm_texture.texture_type();
@@ -417,6 +418,10 @@ void TextureCache::upload_texture(const SceGxmTexture &gxm_texture, MemState &me
     const uint32_t org_layout_height = layout_height;
 
     while (face_uploaded_count < face_total_count && org_width > 0 && org_height > 0) {
+        // Source layout remains the guest format for every mip/face. A previous
+        // conversion may have expanded bpp for host layout processing only.
+        bpp = guest_bpp;
+        bytes_per_pixel = (guest_bpp + 7) >> 3;
         pixels = texture_data;
 
         SceGxmTextureBaseFormat upload_format = base_format;
@@ -509,6 +514,8 @@ void TextureCache::upload_texture(const SceGxmTexture &gxm_texture, MemState &me
             convert_u2f10f10f10_to_f16f16f16f16(texture_data_decompressed.data(), pixels, pixels_per_stride, memory_height, fmt);
             pixels = texture_data_decompressed.data();
             upload_format = SCE_GXM_TEXTURE_BASE_FORMAT_F16F16F16F16;
+            bpp = 64;
+            bytes_per_pixel = 8;
             break;
         case SCE_GXM_TEXTURE_BASE_FORMAT_X8U24:
             texture_data_decompressed.resize(pixels_per_stride * memory_height * 4);
