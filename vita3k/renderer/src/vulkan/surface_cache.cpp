@@ -726,6 +726,23 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         };
     }
 
+    // A typeless cast through a staging buffer is a raw byte reinterpretation.
+    // It cannot safely convert a host-expanded render target into a different
+    // byte layout: that produces noisy textures instead of valid pixels.
+    // Fall back to the normal guest-memory texture path for such cases.
+    const bool needs_typeless_buffer = bytes_per_pixel_requested != bytes_per_pixel_in_store
+        || vk::blockSize(info.texture.format) != vk::blockSize(vk_format);
+    if (needs_typeless_buffer && !byte_equivalent_linear_alias) {
+        const uint64_t source_row_bytes = static_cast<uint64_t>(info.width) * vk::blockSize(info.texture.format);
+        const uint64_t destination_row_bytes = static_cast<uint64_t>(width) * vk::blockSize(vk_format);
+        if (source_row_bytes != destination_row_bytes || info.height != height || start_x != 0 || start_sourced_line != 0) {
+            LOG_WARN_ONCE("Surface-as-texture: rejecting incompatible host typeless cast (src={}x{} {}B, dst={}x{} {}B)",
+                info.width, info.height, vk::blockSize(info.texture.format),
+                width, height, vk::blockSize(vk_format));
+            return std::nullopt;
+        }
+    }
+
     if (is_same_image || (start_sourced_line != 0) || (start_x != 0) || (info.width != width) || (info.height != height) || (info.format != base_format)) {
         const uint64_t scene_timestamp = reinterpret_cast<VKContext *>(state.context)->scene_timestamp;
 
