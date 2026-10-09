@@ -947,7 +947,7 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
 
 void VKState::late_init(const Config &cfg, const std::string_view game_id, MemState &mem) {
 #ifdef VITA3K_PLATFORM_IOS
-    LOG_INFO("iOS compatibility v17: float attachments; title-scoped exact material crops; feature-keyed shaders");
+    LOG_INFO("iOS compatibility v18: resolved title identity; typed packed RG32 output/fetch/mask; exact material crops");
 #endif
     this->mem = &mem;
 
@@ -971,13 +971,18 @@ void VKState::late_init(const Config &cfg, const std::string_view game_id, MemSt
     }
 
 #ifdef VITA3K_PLATFORM_IOS
+    features.preserve_packed_rg32 = game_id == "PCSD00001";
     if (game_id == "PCSD00001") {
+        // The packed integer attachment uses typed subpass framebuffer fetch;
+        // the floating storage-image interlock path cannot bind that image.
+        features.support_shader_interlock = false;
+        features.direct_fragcolor = true;
         // A viewport transform selects an atlas region but does not reproduce
         // clamp/repeat at that region's edges. Golden Abyss uses cropped
         // render targets as material textures: give the sampler an actual
         // image with the guest extent instead of wrapping the whole target.
         features.use_texture_viewport = false;
-        LOG_INFO("Golden Abyss: exact GPU material crops enabled; float output retained");
+        LOG_INFO("Golden Abyss: exact GPU material crops and typed packed RG32 enabled");
     }
 #endif
 
@@ -1320,6 +1325,7 @@ uint32_t VKState::get_features_mask() {
             bool use_memory_mapping : 1;
             bool use_rgb_attributes : 1;
             bool use_scaled_attributes : 1;
+            bool preserve_packed_rg32 : 1;
         };
         uint32_t value;
     } features_mask;
@@ -1331,6 +1337,7 @@ uint32_t VKState::get_features_mask() {
     features_mask.use_memory_mapping = features.enable_memory_mapping;
     features_mask.use_rgb_attributes = features.support_rgb_attributes;
     features_mask.use_scaled_attributes = pipeline_cache.support_scaled_vertex_attribute;
+    features_mask.preserve_packed_rg32 = features.preserve_packed_rg32;
 
     return features_mask.value;
 }

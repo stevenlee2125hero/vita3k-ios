@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test production SPIR-V precision filtering and packed word preservation."""
+"""Test typed material masks, title identity and pipeline compatibility."""
 from pathlib import Path
 import os
 import subprocess
@@ -32,10 +32,19 @@ for field in set(re.findall(r'\brecord\.(\w+)', compile_body)):
     assert re.search(r'\b' + re.escape(field) + r'\b', prefix), 'Async pipeline reads uncopied field: ' + field
 fmt = (root / 'vita3k/renderer/src/vulkan/gxm_to_vulkan.cpp').read_text()
 color = fmt[fmt.index('namespace color {'):fmt.index('namespace texture {')]
-assert 'return vk::Format::eR32G32Sfloat;' in color
-assert 'return vk::Format::eR32G32Uint;' not in color
-assert 'raw_rg32' not in s
-assert 'output_type = b.makeVectorType(b.makeUintType(32), 4);' not in s
+assert 'preserve_packed_rg32 ? vk::Format::eR32G32Uint : vk::Format::eR32G32Sfloat' in color
+assert 'features.preserve_packed_rg32' in c
+app_init = (root / 'vita3k/app/src/app_init.cpp').read_text()
+dispatch = next(line for line in app_init.splitlines() if 'state.renderer->late_init(' in line)
+apps = (root / 'vita3k/app/src/apps_list.cpp').read_text()
+identity_start = apps.index('    emuenv.io.app_path = it->path;')
+identity_assignment = apps[identity_start:apps.index('    return true;', identity_start)]
+output_start = s.index('        const bool packed_rg32 = translate_state.is_vulkan')
+output = s[output_start:s.index('        if (features.preserve_f16_nan_as_u16)', output_start)]
+fetch_start = s.index('            const bool packed_rg32 = translation_state.is_vulkan')
+fetch = s[fetch_start:s.index('            translation_state.last_frag_data_id', fetch_start)]
+blend_start = p.index('        vk::PipelineColorBlendAttachmentState blending = fragment_program.blending;')
+blend = p[blend_start:p.index('        color_blending.setAttachments(blending);', blend_start)]
 code = r'''
 #include <vector>
 #include <cstdint>
@@ -45,18 +54,25 @@ code = r'''
 #include <array>
 #include <map>
 #include <string_view>
+#include <string>
 #include <cstring>
 #include <memory>
 #define LOG_INFO(...) ((void)0)
 #define VITA3K_PLATFORM_IOS 1
+#define VK_FALSE 0
 namespace spv {
 using Id=uint32_t;
-enum{OpDecorate=71,DecorationRelaxedPrecision=0,NoPrecision=0,StorageClassUniform=2,StorageClassOutput=3,DecorationLocation=30,OpBitcast=124};
+enum{OpDecorate=71,DecorationRelaxedPrecision=0,NoPrecision=0,StorageClassUniform=2,StorageClassOutput=3,DecorationLocation=30,OpBitcast=124,StorageClassUniformConstant=0,DimSubpassData=6,ImageFormatUnknown=0,DecorationInputAttachmentIndex=43,DecorationBinding=33,DecorationDescriptorSet=34,OpImageRead=98};
 struct Builder {
  std::map<Id,Id> types;Id next=100,output_type=0;
  Id makeFloatType(int){return 1;}Id makeUintType(int){return 2;}Id makeIntConstant(int){return 3;}
- Id makeVectorType(Id scalar,int count){assert(count==4);return 10+scalar;}
- Id createLoad(Id,int){return 4;}
+ Id makeVectorType(Id scalar,int count){assert(count==2||count==4);return count==4?10+scalar:30+scalar;}
+ Id makeIntType(int){return 3;}
+ Id makeImageType(Id scalar,int,bool,bool,bool,int,int){return 20+scalar;}
+ Id makeCompositeConstant(Id type,std::initializer_list<Id>){types[next]=type;return next++;}
+ Id createLoad(Id var,int){if(types.contains(var))return var;types[4]=1;return 4;}
+ Id createOp(int op,Id type,std::initializer_list<Id> args){assert(op==OpImageRead);assert(type==types[*args.begin()]-10);types[next]=type;return next++;}
+ void setPrecision(Id,int){}
  Id createCompositeConstruct(Id type,std::initializer_list<Id>){types[next]=type;return next++;}
  Id createUnaryOp(int,Id type,Id){types[next]=type;return next++;}
  Id createVariable(int,int,Id type,const char*){output_type=type;types[next]=type;return next++;}
@@ -67,7 +83,8 @@ enum class SceGxmProgramType{Vertex,Fragment};
 constexpr uint32_t SCE_GXM_COLOR_BASE_FORMAT_F32F32=11;
 constexpr uint32_t SCE_GXM_COLOR_BASE_FORMAT_U8U8U8U8=3;
 constexpr uint32_t SCE_GXM_COLOR_FORMAT_U8U8U8U8_ABGR=3;
-namespace vk {enum class Format{eR8G8B8A8Unorm,eR32G32Uint};}
+namespace vk {enum class Format{eR8G8B8A8Unorm,eR32G32Uint};
+struct PipelineColorBlendAttachmentState{bool blendEnable=true;};}
 struct Address {uint32_t value;uint32_t address()const{return value;}};
 struct Surface {Address data{};uint32_t colorFormat=11;bool downscale=false;};
 struct Record {Surface color_surface;bool is_gamma_corrected=true,is_maskupdate=true;uint32_t color_base_format=11;};
@@ -101,6 +118,7 @@ uint64_t material_variant(const Hints& hints,bool is_vertex,bool maskupdate){
 '''+mask_stage+variant+r'''
  return variant_tag;
 }
+struct FeatureState {bool preserve_packed_rg32=false;};
 struct TranslationState {spv::Id render_info_id=0;bool is_vulkan=true,is_maskupdate=false;const Hints* hints;std::vector<spv::Id> interfaces;};
 '''+mask_body+r'''
 struct Program {SceGxmProgramType type;auto get_type()const{return type;}};
@@ -108,14 +126,52 @@ bool mask_enabled(const Program& program,bool maskupdate){TranslationState trans
 '''+mask_guard+r'''
  return translation_state.is_maskupdate;
 }
-struct CropFeatures {bool use_texture_viewport=false;};
+struct CropFeatures {bool use_texture_viewport=false,preserve_packed_rg32=false,support_shader_interlock=true,direct_fragcolor=false;};
 void select_crop(CropFeatures& features,bool support_standard_layout,bool use_high_accuracy,std::string_view game_id){
 '''+crop_selection+r'''
 }
+struct Entry {std::string path,title_id,addcont,content_id,savedata,title,app_ver,category,stitle;};
+struct RendererStub {std::string received;void late_init(int,std::string_view title,int){received=title;}};
+struct Env {std::string app_path,current_app_title;
+ struct {std::string app_path,title_id,addcont,content_id,savedata;} io;
+ struct {std::string app_version,app_category,app_short_title;} app_info;
+ int cfg=0,mem=0;RendererStub* renderer;};
+void check_material_pipeline(bool enabled,bool vulkan,uint32_t format){
+ FeatureState features;features.preserve_packed_rg32=enabled;
+ Hints hints{};hints.color_format=format;
+ TranslationState translate_state{};translate_state.is_vulkan=vulkan;translate_state.hints=&hints;
+ spv::Builder b;spv::Id color=99;b.types[color]=11;int precision=spv::NoPrecision;
+'''+output+r'''
+ assert(b.output_type==((enabled && vulkan && format==SCE_GXM_COLOR_BASE_FORMAT_F32F32)?12:11));
+ if(format==SCE_GXM_COLOR_BASE_FORMAT_F32F32){
+  TranslationState translation_state=translate_state;
+  const auto f32=b.makeFloatType(32),v4=b.makeVectorType(f32,4);spv::Id source=0;
+'''+fetch+r'''
+  assert(b.types[source]==11); // integer fetch must bitcast back to the guest float register bank
+ }
+ struct {FeatureState features;} state;state.features=features;
+ struct {uint32_t color_base_format;} record;record.color_base_format=format;
+ struct {vk::PipelineColorBlendAttachmentState blending;} fragment_program;
+'''+blend+r'''
+ assert(blending.blendEnable==!(enabled && format==SCE_GXM_COLOR_BASE_FORMAT_F32F32));
+}
+void check_real_title_dispatch(){
+ RendererStub renderer;Env emuenv;emuenv.renderer=&renderer;
+ for(auto title:{"PCSD00001","PCSG01112","PCSD00001"}) {
+  Entry entry;entry.path="renamed-library-directory";entry.title_id=title;
+  auto it=&entry;
+'''+identity_assignment+r'''
+  auto& state=emuenv;
+'''+dispatch+r'''
+  assert(renderer.received==title);
+  CropFeatures features;select_crop(features,true,false,renderer.received);
+  assert(features.preserve_packed_rg32==(entry.title_id=="PCSD00001"));
+ }
+}
 void check_crop_sessions(){
  CropFeatures features;
- select_crop(features,true,false,"PCSD00001");assert(!features.use_texture_viewport);
- select_crop(features,true,false,"PCSG01112");assert(features.use_texture_viewport);
+ select_crop(features,true,false,"PCSD00001");assert(!features.use_texture_viewport && features.preserve_packed_rg32);
+ select_crop(features,true,false,"PCSG01112");assert(features.use_texture_viewport && !features.preserve_packed_rg32);
  select_crop(features,true,true,"PCSG01112");assert(!features.use_texture_viewport);
  select_crop(features,true,false,"PCSG01112");assert(features.use_texture_viewport);
  select_crop(features,false,false,"PCSG01112");assert(!features.use_texture_viewport);
@@ -133,6 +189,9 @@ void check_crop_sessions(){
  assert(image[1]!=image[2]); // negative u must clamp at the crop, not target texel 1.
 }
 int main(){
+ for(bool enabled:{false,true})for(bool vulkan:{false,true})
+  for(auto format:{0u,SCE_GXM_COLOR_BASE_FORMAT_F32F32})check_material_pipeline(enabled,vulkan,format);
+ check_real_title_dispatch();
  check_crop_sessions();
  check_transient_fallback();
  std::vector<SceGxmVertexAttribute> attrs{{0,0,0,3,0}};
@@ -156,10 +215,12 @@ int main(){
  assert(!mask_enabled({SceGxmProgramType::Fragment},false));
  state.mask=2;assert(material_variant(hints,true,false)!=vertex);
  state.mask=0;hints.color_format=0;assert(material_variant(hints,true,false)==vertex);
+ FeatureState features;
  TranslationState state{};state.hints=&hints;
- hints.color_format=0;spv::Builder float_builder;generate_update_mask_body(float_builder,state);assert(float_builder.output_type==11);
- hints.color_format=SCE_GXM_COLOR_BASE_FORMAT_F32F32;spv::Builder uint_builder;generate_update_mask_body(uint_builder,state);assert(uint_builder.output_type==11);
- state.is_vulkan=false;spv::Builder gl_builder;generate_update_mask_body(gl_builder,state);assert(gl_builder.output_type==11);
+ hints.color_format=0;spv::Builder float_builder;generate_update_mask_body(float_builder,state,features);assert(float_builder.output_type==11);
+ hints.color_format=SCE_GXM_COLOR_BASE_FORMAT_F32F32;spv::Builder uint_builder;generate_update_mask_body(uint_builder,state,features);assert(uint_builder.output_type==11);
+ features.preserve_packed_rg32=true;spv::Builder packed_builder;generate_update_mask_body(packed_builder,state,features);assert(packed_builder.output_type==12);
+ state.is_vulkan=false;spv::Builder gl_builder;generate_update_mask_body(gl_builder,state,features);assert(gl_builder.output_type==11);
 
 }
 '''
@@ -170,4 +231,4 @@ with tempfile.TemporaryDirectory() as tmp:
     subprocess.run(['c++', '-std=c++20', '-fsanitize=address,undefined',
                     str(cpp), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True, env=dict(os.environ, ASAN_OPTIONS='detect_leaks=0'))
-print('PASS: float mask outputs, feature/stage/attribute variant keys, per-title crop reset, transient format and async prefix bounds (builder/hash stubs)')
+print('PASS: production output/fetch/blend type agreement, title dispatch and mask outputs, feature/stage/attribute variant keys, per-title crop reset, transient format and async prefix bounds (builder/hash stubs)')

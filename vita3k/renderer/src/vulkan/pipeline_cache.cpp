@@ -918,7 +918,13 @@ vk::Pipeline PipelineCache::compile_pipeline(SceGxmPrimitiveType type, vk::Rende
         };
         color_blending.setAttachments(blending);
     } else {
-        const vk::PipelineColorBlendAttachmentState &blending = fragment_program.blending;
+        vk::PipelineColorBlendAttachmentState blending = fragment_program.blending;
+        if (state.features.preserve_packed_rg32 && record.color_base_format == SCE_GXM_COLOR_BASE_FORMAT_F32F32) {
+            // Integer render attachments cannot use fixed-function floating
+            // blending. Packed material words are already composed by USSE;
+            // programmable framebuffer fetch retains their exact bits.
+            blending.blendEnable = VK_FALSE;
+        }
         color_blending.setAttachments(blending);
     }
 
