@@ -165,12 +165,12 @@ void check_real_title_dispatch(){
 '''+dispatch+r'''
   assert(renderer.received==title);
   CropFeatures features;select_crop(features,true,false,renderer.received);
-  assert(features.preserve_packed_rg32==(entry.title_id=="PCSD00001"));
+  assert(!features.preserve_packed_rg32); // rejected v18 Metal path stays disabled for every title
  }
 }
 void check_crop_sessions(){
  CropFeatures features;
- select_crop(features,true,false,"PCSD00001");assert(!features.use_texture_viewport && features.preserve_packed_rg32);
+ select_crop(features,true,false,"PCSD00001");assert(!features.use_texture_viewport && !features.preserve_packed_rg32);
  select_crop(features,true,false,"PCSG01112");assert(features.use_texture_viewport && !features.preserve_packed_rg32);
  select_crop(features,true,true,"PCSG01112");assert(!features.use_texture_viewport);
  select_crop(features,true,false,"PCSG01112");assert(features.use_texture_viewport);

@@ -947,7 +947,7 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
 
 void VKState::late_init(const Config &cfg, const std::string_view game_id, MemState &mem) {
 #ifdef VITA3K_PLATFORM_IOS
-    LOG_INFO("iOS compatibility v18: resolved title identity; typed packed RG32 output/fetch/mask; exact material crops");
+    LOG_INFO("iOS compatibility v19: float attachments; exact Golden Abyss crops; synchronous pipelines");
 #endif
     this->mem = &mem;
 
@@ -971,18 +971,17 @@ void VKState::late_init(const Config &cfg, const std::string_view game_id, MemSt
     }
 
 #ifdef VITA3K_PLATFORM_IOS
-    features.preserve_packed_rg32 = game_id == "PCSD00001";
+    // v18 aborted in Metal render-pipeline descriptor validation on-device.
+    // Keep the experimental integer shader/attachment contract unreachable
+    // until the actual Metal assertion and full descriptor are captured.
+    features.preserve_packed_rg32 = false;
     if (game_id == "PCSD00001") {
-        // The packed integer attachment uses typed subpass framebuffer fetch;
-        // the floating storage-image interlock path cannot bind that image.
-        features.support_shader_interlock = false;
-        features.direct_fragcolor = true;
         // A viewport transform selects an atlas region but does not reproduce
         // clamp/repeat at that region's edges. Golden Abyss uses cropped
         // render targets as material textures: give the sampler an actual
         // image with the guest extent instead of wrapping the whole target.
         features.use_texture_viewport = false;
-        LOG_INFO("Golden Abyss: exact GPU material crops and typed packed RG32 enabled");
+        LOG_INFO("Golden Abyss: exact GPU material crops enabled; float output retained");
     }
 #endif
 

@@ -255,6 +255,16 @@ void PipelineCache::init(bool support_rasterized_order_access) {
 }
 
 void PipelineCache::set_async_compilation(bool enable) {
+#ifdef VITA3K_PLATFORM_IOS
+    // Worker publication of shader modules and pipelines is not synchronized
+    // with every render-thread read. Also, deferred draws are skipped and may
+    // never be replayed by games which draw their startup screen only once.
+    // Use the synchronous path on iOS until those contracts are fixed. Apply
+    // this here so both initial config and in-game settings obey the policy.
+    if (enable)
+        LOG_INFO_ONCE("iOS: synchronous pipeline compilation enabled; startup draws are retained");
+    enable = false;
+#endif
     if (enable == use_async_compilation)
         return;
 
@@ -968,6 +978,20 @@ vk::Pipeline PipelineCache::compile_pipeline(SceGxmPrimitiveType type, vk::Rende
         .subpass = 0
     };
 
+#ifdef VITA3K_PLATFORM_IOS
+    // Metal descriptor assertions abort before Vulkan can return an error.
+    // Flush the exact guest/output contract before entering that call so a
+    // device log identifies the failing shader pair instead of only SIGABRT.
+    LOG_INFO("iOS pipeline: vertex={} fragment={} color=0x{:X} hint=0x{:X} mask={} stages={} blend={} write_mask=0x{:X} packed={}",
+        hex_string(vertex_program.hash), hex_string(fragment_program.hash),
+        static_cast<uint32_t>(record.color_base_format),
+        static_cast<uint32_t>(hints.color_format), fragment_program_gxm.is_maskupdate,
+        shader_stage_count, color_blending.pAttachments->blendEnable,
+        static_cast<uint32_t>(color_blending.pAttachments->colorWriteMask),
+        state.features.preserve_packed_rg32);
+    if (auto logger = spdlog::default_logger())
+        logger->flush();
+#endif
     const auto result = state.device.createGraphicsPipeline(pipeline_cache, pipeline_info);
     if (result.result != vk::Result::eSuccess) {
         LOG_CRITICAL("Failed to create pipeline.");
