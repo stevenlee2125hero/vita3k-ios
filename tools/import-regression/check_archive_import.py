@@ -3,6 +3,7 @@
 from pathlib import Path
 import os
 import struct
+import sys
 import subprocess
 import tempfile
 import zipfile
@@ -10,9 +11,9 @@ import zipfile
 root = Path(__file__).resolve().parents[2]
 os.environ['ASAN_OPTIONS'] = 'detect_leaks=0'
 
-def sfo():
+def sfo(category='gd'):
     values = {'TITLE_ID': 'PCSE01171', 'TITLE': 'Undertale import fixture',
-              'CATEGORY': 'gd', 'APP_VER': '01.00'}
+              'CATEGORY': category, 'APP_VER': '01.00'}
     keys, data, entries = b'', b'', b''
     for key, value in values.items():
         encoded = value.encode() + b'\0'
@@ -71,4 +72,36 @@ int main(int argc,char**argv) {
             z.writestr(unsafe, sfo() if index == 4 else b'unsafe')
         assert subprocess.run([str(work/'install'), str(archive), str(destination)]).returncode == 1
         assert not destination.exists(), 'Rejected archives must not alter installed data'
+    # Full Mai dumps report gp, but must install identically on repeat import.
+    archive, destination = work/'mai.zip', work/'mai-vfs'
+    with zipfile.ZipFile(archive, 'w') as z:
+        z.writestr('wrapper/PCSE01171/sce_sys/param.sfo', sfo('gp'))
+        z.writestr('wrapper/PCSE01171/eboot.bin', b'fixture')
+        z.writestr('wrapper/PCSE01171/mai_moe/load_type.mai', b'0')
+    for _ in range(2):
+        subprocess.run([str(work/'install'), str(archive), str(destination)], check=True)
+        assert (destination/'ux0/app/PCSE01171/eboot.bin').exists()
+        assert not (destination/'ux0/patch/PCSE01171').exists()
+    # An explicitly bundled patch remains a patch, even with a Mai marker.
+    with zipfile.ZipFile(archive, 'w') as z:
+        z.writestr('patch/PCSE01171/sce_sys/param.sfo', sfo('gp'))
+        z.writestr('patch/PCSE01171/eboot.bin', b'update')
+        z.writestr('patch/PCSE01171/mai_moe/load_type.mai', b'0')
+    subprocess.run([str(work/'install'), str(archive), str(destination)], check=True)
+    assert (destination/'ux0/patch/PCSE01171/eboot.bin').read_bytes() == b'update'
+    assert (destination/'ux0/app/PCSE01171/eboot.bin').read_bytes() == b'fixture'
+    if len(sys.argv) > 1:
+        archive = Path(sys.argv[1]).resolve()
+        destination = work/'uploaded-vfs'
+        for _ in range(2):
+            subprocess.run([str(work/'install'), str(archive), str(destination)], check=True)
+            assert (destination/'ux0/app/PCSG01112/eboot.bin').is_file()
+            assert not (destination/'ux0/patch/PCSG01112').exists(), 'Full Mai game must remain a base game on reinstall'
+        with zipfile.ZipFile(archive) as z:
+            for n in z.namelist():
+                if n.endswith('/PCSG01112/eboot.bin'):
+                    assert (destination/'ux0/app/PCSG01112/eboot.bin').read_bytes() == z.read(n)
+                if n.endswith('/PCSG01112/sce_sys/param.sfo'):
+                    assert (destination/'ux0/app/PCSG01112/sce_sys/param.sfo').read_bytes() == z.read(n)
+        print('PASS: uploaded Undertale archive installs and reinstalls as base application; eboot/SFO unchanged')
 print('PASS: production import/extract/reinstall, Unix/Windows wrapper paths, UTF-8 assets, traversal and duplicate rejection')

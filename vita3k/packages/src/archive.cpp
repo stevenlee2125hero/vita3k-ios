@@ -372,8 +372,8 @@ ArchiveInstallResult install_archive_transactionally(const std::filesystem::path
     // not an update package. Desktop workflows historically tolerated these
     // layouts, while the strict iOS importer placed them under ux0/patch and
     // then the library quite correctly showed nothing because no ux0/app base
-    // existed. Promote only archives with an explicit MaiDump marker and no
-    // existing base title. Real gp patch archives remain patches.
+    // existed. An already-installed base must not change this classification
+    // on reinstall. Explicit patch/ trees remain update packages.
     for (auto &application : inspection.applications) {
         if (application.category.find("gp") == std::string::npos)
             continue;
@@ -381,7 +381,11 @@ ArchiveInstallResult install_archive_transactionally(const std::filesystem::path
         const bool base_exists = std::filesystem::exists(base_path);
         const bool legacy_full_dump = archive_has_relative_file(zip, application.content_root, "mai_moe/load_type.mai")
             || archive_has_relative_file(zip, application.content_root, "mai_moe/mai.suprx");
-        if (!base_exists && legacy_full_dump) {
+        ArchiveInstallMapping layout;
+        const bool explicit_patch_tree = detect_legacy_vita_tree_mapping(
+                                             application.content_root + "eboot.bin", layout)
+            && layout.install_target.starts_with("ux0/patch/");
+        if (legacy_full_dump && !explicit_patch_tree) {
             LOG_WARN("Archive install: treating legacy Mai full dump {} as base application", application.title_id);
             application.install_target = "ux0/app/" + application.title_id;
         } else if (!base_exists) {
