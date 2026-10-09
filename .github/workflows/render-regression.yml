@@ -45,3 +45,5 @@ jobs:
         run: python3 tools/render-regression/check_rt_alias_feedback.py
       - name: Test strict shader precision and packed material words
         run: python3 tools/render-regression/check_material_accuracy.py
+      - name: Test unaligned uniform copies and literal shuffle indices
+        run: python3 tools/render-regression/check_uniform_shuffle.py

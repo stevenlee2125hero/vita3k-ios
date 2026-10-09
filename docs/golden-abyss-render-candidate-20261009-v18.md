@@ -56,3 +56,25 @@ GPU retirement stubs and +4 alias/copy ordering tests are retained.
 These CPU tests cannot establish that the game renders correctly on the iPhone.
 The final IPA must pass full iOS compilation and package/source verification,
 then the remaining visual result requires device validation.
+
+## Real shader conversion follow-up
+
+A standalone host audit compiled the production shader translator and pinned
+SPIR-V builder/SPIRV-Cross sources. The 482 dump variants contain 77 unique
+fragment GXP programs. Each was converted with float/integer RG32 attachment
+policies and normal/mask output: 308 SPIR-V modules and iOS MSL source variants.
+All 308 modules passed `spirv-val --target-env vulkan1.0` after fixing the
+following pre-existing uniform-copy defect. Texture format hints were default
+RGBA8, not a replay of every recorded runtime sampler binding. No Apple Metal
+compiler or A16 GPU execution was performed.
+
+The initial conversion asserted in `copy_uniform_block_to_register` for actual
+material GXP adb5702727ae8ca52248f169cc0d93e0ac2c09d9ad9b65db5bd1e9888504e5b7,
+even with the float baseline policy. Unaligned uniform `VectorShuffle` used
+`vector<Id>` for component selectors. Selector zero became invalid SPIR-V ID 0.
+Selectors now use `IdImmediate` with `isId=false`; only the two vector sources
+are IDs. A separate production-function regression checks 56 alignment/extent
+cases and preservation of neighboring registers under ASan/UBSan.
+
+This fixes a real shader-construction defect, but does not by itself establish
+that it caused the observed release-build purple materials.
