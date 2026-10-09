@@ -58,7 +58,7 @@ static int execute(std::string &zrif, fs::path &title_src, fs::path &title_dst, 
 
 bool decrypt_install_nonpdrm(EmuEnvState &emuenv, const fs::path &drmlicpath, const fs::path &title_path) {
     fs::path title_id_src = title_path;
-    fs::path title_id_dst = fs_utils::path_concat(title_path, "_dec");
+    fs::path title_id_dst = fs_utils::path_concat(title_path, fs::unique_path("_dec-%%%%%%%%"));
     fs::ifstream binfile(drmlicpath, std::ios::in | std::ios::binary | std::ios::ate);
     std::string zRIF = rif2zrif(binfile);
     F00DEncryptorTypes f00d_enc_type = F00DEncryptorTypes::native;
@@ -70,8 +70,24 @@ bool decrypt_install_nonpdrm(EmuEnvState &emuenv, const fs::path &drmlicpath, co
     if (!emuenv.app_info.app_category.contains("gp"))
         copy_license(emuenv, drmlicpath);
 
-    fs::remove_all(title_id_src);
-    fs::rename(title_id_dst, title_id_src);
+    // Never remove the original title before verifying and committing output.
+    // A failed/incomplete decrypt previously discarded the only installed copy.
+    if (!fs::is_directory(title_id_dst)
+        || !fs::is_regular_file(title_id_dst / "sce_sys/param.sfo"))
+        return false;
+    const fs::path backup = fs_utils::path_concat(title_path, "_encrypted_backup");
+    if (fs::exists(backup)) {
+        LOG_ERROR("Cannot commit decryption: recovery backup already exists at {}", backup);
+        return false;
+    }
+    fs::rename(title_id_src, backup);
+    try {
+        fs::rename(title_id_dst, title_id_src);
+    } catch (...) {
+        fs::rename(backup, title_id_src);
+        throw;
+    }
+    fs::remove_all(backup);
 
     return true;
 }

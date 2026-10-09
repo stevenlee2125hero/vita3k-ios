@@ -730,7 +730,10 @@ static void create_fragment_inputs(spv::Builder &b, SpirvShaderParameters &param
             // The GPU supports gl_LastFragData.
             // On Vulkan this is a subpass input, it is similar to gl_LastFragData (and should have the same speed on integrated GPUs)
             // This is not supported on OpenGL with SpirV
-            const spv::Id image_type = b.makeImageType(f32, spv::DimSubpassData, false, false, false, 2, spv::ImageFormatUnknown);
+            const bool packed_rg32 = translation_state.is_vulkan && features.preserve_packed_rg32
+                && gxm::get_base_format(translation_state.hints->color_format) == SCE_GXM_COLOR_BASE_FORMAT_F32F32;
+            const spv::Id sample_type = packed_rg32 ? b.makeUintType(32) : f32;
+            const spv::Id image_type = b.makeImageType(sample_type, spv::DimSubpassData, false, false, false, 2, spv::ImageFormatUnknown);
             const spv::Id last_frag_data = b.createVariable(precision, spv::StorageClassUniformConstant, image_type, "last_frag_data");
             b.addDecoration(last_frag_data, spv::DecorationInputAttachmentIndex, 0);
             if (translation_state.is_vulkan) {
@@ -742,7 +745,12 @@ static void create_fragment_inputs(spv::Builder &b, SpirvShaderParameters &param
             spv::Id coord_0 = b.makeIntConstant(0);
             const spv::Id ivec2 = b.makeVectorType(b.makeIntType(32), 2);
             coord_0 = b.makeCompositeConstant(ivec2, { coord_0, coord_0 });
-            source = b.createOp(spv::OpImageRead, v4, { b.createLoad(last_frag_data, spv::NoPrecision), coord_0 });
+            const spv::Id fetched_type = packed_rg32 ? b.makeVectorType(sample_type, 4) : v4;
+            source = b.createOp(spv::OpImageRead, fetched_type, { b.createLoad(last_frag_data, spv::NoPrecision), coord_0 });
+            if (packed_rg32)
+                // The guest output bank contains the bits of the packed words,
+                // not the numeric float conversion of those integers.
+                source = b.createUnaryOp(spv::OpBitcast, v4, source);
             b.setPrecision(source, precision);
 
             translation_state.last_frag_data_id = last_frag_data;
@@ -847,17 +855,19 @@ static void copy_uniform_block_to_register(spv::Builder &builder, spv::Id sa_ban
         } else {
             dest_friend = utils::create_access_chain(builder, spv::StorageClassPrivate, sa_bank, { builder.createBinOp(spv::OpIAdd, ite_type, ite_loaded, builder.makeIntConstant(start_in_vec4_granularity + 1)) });
 
-            std::vector<spv::Id> ops_copy_1 = { builder.createLoad(dest, spv::NoPrecision), to_copy };
-            std::vector<spv::Id> ops_copy_2 = { builder.createLoad(dest_friend, spv::NoPrecision), to_copy };
+            // VectorShuffle component selectors are literal indices, not IDs.
+            // In particular, component 0 must not become the invalid SPIR-V ID 0.
+            std::vector<spv::IdImmediate> ops_copy_1 = { { true, builder.createLoad(dest, spv::NoPrecision) }, { true, to_copy } };
+            std::vector<spv::IdImmediate> ops_copy_2 = { { true, builder.createLoad(dest_friend, spv::NoPrecision) }, { true, to_copy } };
 
             for (int i = 0; i < start % 4; i++) {
-                ops_copy_1.push_back(i);
-                ops_copy_2.push_back(4 + (4 - start % 4) + i);
+                ops_copy_1.emplace_back(false, i);
+                ops_copy_2.emplace_back(false, 4 + (4 - start % 4) + i);
             }
 
             for (int i = 0; i < (4 - start % 4); i++) {
-                ops_copy_1.push_back(4 + i);
-                ops_copy_2.push_back((start % 4) + i);
+                ops_copy_1.emplace_back(false, 4 + i);
+                ops_copy_2.emplace_back(false, (start % 4) + i);
             }
 
             to_copy = builder.createOp(spv::OpVectorShuffle, builder.getTypeId(to_copy), ops_copy_1);
@@ -1530,7 +1540,14 @@ static spv::Function *make_frag_finalize_function(spv::Builder &b, const SpirvSh
             b.createNoResultOp(spv::OpImageWrite, { b.createLoad(translate_state.color_attachment_raw_id, spv::NoPrecision), translated_id, color });
         }
     } else {
-        spv::Id out = b.createVariable(precision, spv::StorageClassOutput, b.makeVectorType(b.makeFloatType(32), 4), "out_color");
+        const bool packed_rg32 = translate_state.is_vulkan && features.preserve_packed_rg32
+            && gxm::get_base_format(translate_state.hints->color_format) == SCE_GXM_COLOR_BASE_FORMAT_F32F32;
+        const spv::Id output_type = b.makeVectorType(packed_rg32 ? b.makeUintType(32) : b.makeFloatType(32), 4);
+        if (packed_rg32) {
+            color = b.createUnaryOp(spv::OpBitcast, output_type, color);
+            precision = spv::NoPrecision;
+        }
+        spv::Id out = b.createVariable(precision, spv::StorageClassOutput, output_type, "out_color");
         translate_state.interfaces.push_back(out);
         b.addDecoration(out, spv::DecorationLocation, 0);
         b.createStore(color, out);
@@ -1816,14 +1833,19 @@ static spv::Function *make_frag_initialize_function(spv::Builder &b, Translation
     return frag_init_func;
 }
 
-static void generate_update_mask_body(spv::Builder &b, TranslationState &translate_state) {
+static void generate_update_mask_body(spv::Builder &b, TranslationState &translate_state, const FeatureState &features) {
     const spv::Id writing_mask_var = utils::create_access_chain(b, spv::StorageClassUniform, translate_state.render_info_id, { b.makeIntConstant(FRAG_UNIFORM_writing_mask) });
     const spv::Id writing_mask = b.createLoad(writing_mask_var, spv::NoPrecision);
 
     const spv::Id v4 = b.makeVectorType(b.makeFloatType(32), 4);
-    const spv::Id mask_v = b.createCompositeConstruct(v4, { writing_mask, writing_mask, writing_mask, writing_mask });
+    spv::Id mask_v = b.createCompositeConstruct(v4, { writing_mask, writing_mask, writing_mask, writing_mask });
+    const bool packed_rg32 = translate_state.is_vulkan && features.preserve_packed_rg32
+        && gxm::get_base_format(translate_state.hints->color_format) == SCE_GXM_COLOR_BASE_FORMAT_F32F32;
+    const spv::Id output_type = packed_rg32 ? b.makeVectorType(b.makeUintType(32), 4) : v4;
+    if (packed_rg32)
+        mask_v = b.createUnaryOp(spv::OpBitcast, output_type, mask_v);
 
-    const spv::Id out = b.createVariable(spv::NoPrecision, spv::StorageClassOutput, v4, "out_color");
+    const spv::Id out = b.createVariable(spv::NoPrecision, spv::StorageClassOutput, output_type, "out_color");
     translate_state.interfaces.push_back(out);
     b.addDecoration(out, spv::DecorationLocation, 0);
 
@@ -1951,7 +1973,7 @@ static SpirvCode convert_gxp_to_spirv_impl(const SceGxmProgram &program, const s
 
         generate_shader_body(b, parameters, program, features, utils, begin_hook_func, end_hook_func, texture_queries, translation_state.render_info_id, spv_func_main, translation_state.interfaces);
     } else {
-        generate_update_mask_body(b, translation_state);
+        generate_update_mask_body(b, translation_state, features);
     }
     b.leaveFunction();
 
@@ -2075,7 +2097,7 @@ GeneratedShader convert_gxp(const SceGxmProgram &program, const std::string &sha
     bool force_shader_debug, const std::function<bool(const std::string &ext, const std::string &dump)> &dumper) {
     TranslationState translation_state;
     translation_state.is_fragment = program.is_fragment();
-    translation_state.is_maskupdate = maskupdate;
+    translation_state.is_maskupdate = maskupdate && program.get_type() == SceGxmProgramType::Fragment;
     translation_state.is_target_glsl = (target == Target::GLSLOpenGL);
     translation_state.is_vulkan = (target == Target::SpirVVulkan);
     translation_state.hints = &hints;

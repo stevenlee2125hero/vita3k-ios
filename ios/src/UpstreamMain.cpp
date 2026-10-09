@@ -27,19 +27,14 @@
 #include <app/session_controller.h>
 #include <app/state.h>
 #include <audio/state.h>
-#include <packages/archive.h>
-#include <packages/functions.h>
-#include <packages/license.h>
-#include <packages/pkg.h>
-#include <packages/sfo.h>
 #include <compat/functions.h>
 #include <compat/state.h>
 #include <config/functions.h>
 #include <config/state.h>
 #include <config/version.h>
+#include <cpu/functions.h>
 #include <ctrl/functions.h>
 #include <ctrl/state.h>
-#include <cpu/functions.h>
 #include <display/state.h>
 #include <emuenv/state.h>
 #include <io/state.h>
@@ -47,6 +42,11 @@
 #include <modules/module_parent.h>
 #include <np/trophy/collection.h>
 #include <np/trophy/trp_parser.h>
+#include <packages/archive.h>
+#include <packages/functions.h>
+#include <packages/license.h>
+#include <packages/pkg.h>
+#include <packages/sfo.h>
 #include <renderer/frame_host.h>
 #include <renderer/functions.h>
 #include <renderer/state.h>
@@ -70,8 +70,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <cctype>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -83,10 +83,10 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <utility>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 // Backs the optional in-game live log overlay: a small ring buffer fed by a
@@ -296,8 +296,7 @@ Vita3KIOSTrophyCollection load_trophies(EmuEnvState &emuenv, const std::string &
 void show_trophies(EmuEnvState &emuenv, const std::string &requested_id,
     const std::string &fallback_title, const std::string &title_id,
     const bool can_edit = true) {
-    auto collection =
-        load_trophies(emuenv, requested_id, fallback_title, title_id);
+    auto collection = load_trophies(emuenv, requested_id, fallback_title, title_id);
     collection.can_edit = can_edit;
     vita3k_ios_present_trophies(collection);
 }
@@ -971,7 +970,7 @@ void start_save_import(EmuEnvState &emuenv, const std::string &title_id, const s
                         boost::system::error_code trophy_error;
                         if (has_prefixes && fs::exists(staged_trophy, trophy_error) && !trophy_error) {
                             for (fs::directory_iterator it(staged_trophy, trophy_error), end;
-                                 it != end && !trophy_error; it.increment(trophy_error)) {
+                                it != end && !trophy_error; it.increment(trophy_error)) {
                                 if (!fs::is_directory(it->path(), trophy_error) || trophy_error)
                                     continue;
                                 const std::string np_com_id = fs_utils::path_to_utf8(it->path().filename());
@@ -1157,8 +1156,7 @@ void start_all_saves_export(EmuEnvState &emuenv) {
                 bool ok = true;
                 std::size_t files = 0;
                 const fs::path save_root = all_saves_path(emuenv);
-                const fs::path trophy_root =
-                    emuenv.vita_fs_path / "ux0/user" / emuenv.io.user_id / "trophy/data";
+                const fs::path trophy_root = emuenv.vita_fs_path / "ux0/user" / emuenv.io.user_id / "trophy/data";
 
                 const auto add_identifier_directories =
                     [&](const fs::path &root, const std::string &prefix) {
@@ -1166,11 +1164,10 @@ void start_all_saves_export(EmuEnvState &emuenv) {
                         if (!fs::exists(root, error))
                             return !error;
                         for (fs::directory_iterator it(root, error), end;
-                             it != end && !error; it.increment(error)) {
+                            it != end && !error; it.increment(error)) {
                             if (!fs::is_directory(it->path(), error) || error)
                                 continue;
-                            const std::string identifier =
-                                fs_utils::path_to_utf8(it->path().filename());
+                            const std::string identifier = fs_utils::path_to_utf8(it->path().filename());
                             if (!safe_identifier(identifier, 16)
                                 || !add_directory_to_zip(zip, it->path(),
                                     prefix + identifier + "/", files))
@@ -1198,8 +1195,7 @@ void start_all_saves_export(EmuEnvState &emuenv) {
                 mz_zip_writer_end(&zip);
                 if (ok) {
                     job->success = true;
-                    job->message =
-                        "All saves, trophy progress, and play time exported";
+                    job->message = "All saves, trophy progress, and play time exported";
                     job->share_path = output_text;
                 } else {
                     boost::system::error_code cleanup_error;
@@ -1225,7 +1221,7 @@ std::size_t restore_playtimes_from_directory(EmuEnvState &emuenv,
     const auto apps = app::get_apps(emuenv);
     std::vector<app::AppTime> imported;
     for (fs::directory_iterator it(directory, error), end;
-         it != end && !error; it.increment(error)) {
+        it != end && !error; it.increment(error)) {
         if (!fs::is_regular_file(it->path(), error) || error
             || it->path().extension() != ".txt")
             continue;
@@ -1265,10 +1261,8 @@ std::size_t restore_playtimes_from_directory(EmuEnvState &emuenv,
             if (existing == times.end()) {
                 times.push_back(value);
             } else {
-                existing->time_used =
-                    std::max(existing->time_used, value.time_used);
-                existing->last_time_used =
-                    std::max(existing->last_time_used, value.last_time_used);
+                existing->time_used = std::max(existing->time_used, value.time_used);
+                existing->last_time_used = std::max(existing->last_time_used, value.last_time_used);
             }
         }
     }
@@ -1286,8 +1280,7 @@ void start_all_saves_import(EmuEnvState &emuenv, const std::string &archive_path
     g_import_job = job;
     std::thread([job, archive_path, &emuenv] {
         const fs::path save_root = all_saves_path(emuenv);
-        const fs::path trophy_root =
-            emuenv.vita_fs_path / "ux0/user" / emuenv.io.user_id / "trophy/data";
+        const fs::path trophy_root = emuenv.vita_fs_path / "ux0/user" / emuenv.io.user_id / "trophy/data";
         const fs::path staging = save_root.parent_path() / "transfer.importing";
         const fs::path backup_root = save_root.parent_path() / "transfer.backup";
         std::vector<std::string> save_ids;
@@ -1349,8 +1342,7 @@ void start_all_saves_import(EmuEnvState &emuenv, const std::string &archive_path
                         identifiers = &trophy_ids;
                         relative = name.substr(std::string_view("trophy/").size());
                     } else if (name.starts_with("meta/playtime/")) {
-                        const std::string_view filename =
-                            name.substr(std::string_view("meta/playtime/").size());
+                        const std::string_view filename = name.substr(std::string_view("meta/playtime/").size());
                         if (!filename.ends_with(".txt")
                             || filename.find('/') != std::string_view::npos
                             || !safe_identifier(
@@ -1457,16 +1449,14 @@ void start_all_saves_import(EmuEnvState &emuenv, const std::string &archive_path
                     rollback();
                     boost::system::error_code backup_cleanup_error;
                     fs::remove_all(backup_root, backup_cleanup_error);
-                    job->message =
-                        "All-saves import was rejected; existing progress was left unchanged";
+                    job->message = "All-saves import was rejected; existing progress was left unchanged";
                 } else {
                     const std::size_t playtimes = has_playtime
                         ? restore_playtimes_from_directory(emuenv, staging / "meta/playtime")
                         : 0;
                     if (has_playtime && playtimes == 0) {
                         rollback();
-                        job->message =
-                            "All-saves import could not restore play time; existing progress was left unchanged";
+                        job->message = "All-saves import could not restore play time; existing progress was left unchanged";
                     } else {
                         fs::remove_all(backup_root, error);
                         job->success = true;
@@ -1618,13 +1608,9 @@ void start_library_archive_export(EmuEnvState &emuenv,
                     ok = ok && add_optional(add_root("ux0/license", "license"), "the license");
                     // Save data, trophy progress and playtime travel with the
                     // game so a restored library resumes where it left off.
-                    ok = ok && add_optional(add_directory_to_zip(zip,
-                                                save_path_for_title(emuenv, title_id),
-                                                "savedata/" + title_id + "/", files),
-                        "the save");
+                    ok = ok && add_optional(add_directory_to_zip(zip, save_path_for_title(emuenv, title_id), "savedata/" + title_id + "/", files), "the save");
 
-                    const std::string np_com_id =
-                        trophy_id_for_title(emuenv, title_id);
+                    const std::string np_com_id = trophy_id_for_title(emuenv, title_id);
                     if (ok && !np_com_id.empty()) {
                         ok = add_optional(add_directory_to_zip(zip,
                                               trophy_data_path_for_id(emuenv, np_com_id),
@@ -1636,8 +1622,7 @@ void start_library_archive_export(EmuEnvState &emuenv,
                         [&](const auto &entry) {
                             return entry.title_id == title_id;
                         });
-                    const std::string app_path =
-                        app_it != apps.end() && !app_it->path.empty()
+                    const std::string app_path = app_it != apps.end() && !app_it->path.empty()
                         ? app_it->path
                         : title_id;
                     const auto time_it = times.find(app_path);
@@ -1698,8 +1683,7 @@ void start_library_archive_import(EmuEnvState &emuenv,
     job->rescan_apps = true;
     g_import_job = job;
     std::thread([job, archive_path, &emuenv] {
-        const fs::path user_root =
-            emuenv.vita_fs_path / "ux0/user" / emuenv.io.user_id;
+        const fs::path user_root = emuenv.vita_fs_path / "ux0/user" / emuenv.io.user_id;
         const fs::path staging = user_root / "library.importing";
         const fs::path backup_root = user_root / "library.backup";
         std::vector<std::string> app_ids;
@@ -1727,8 +1711,7 @@ void start_library_archive_import(EmuEnvState &emuenv,
         };
 
         try {
-            const std::string archive_text =
-                fs_utils::path_to_utf8(fs::path(archive_path));
+            const std::string archive_text = fs_utils::path_to_utf8(fs::path(archive_path));
             if (!mz_zip_reader_init_file(&zip, archive_text.c_str(), 0)) {
                 job->message = "The selected game transfer is not a readable ZIP archive";
             } else {
@@ -1815,8 +1798,7 @@ void start_library_archive_import(EmuEnvState &emuenv,
                             == identifiers->end())
                             identifiers->push_back(identifier);
                     } else if (name.starts_with("meta/playtime/")) {
-                        const std::string_view filename =
-                            name.substr(std::string_view("meta/playtime/").size());
+                        const std::string_view filename = name.substr(std::string_view("meta/playtime/").size());
                         if (!filename.ends_with(".txt")
                             || filename.find('/') != std::string_view::npos) {
                             ok = false;
@@ -1843,26 +1825,23 @@ void start_library_archive_import(EmuEnvState &emuenv,
                         // the difference between a fixable report and a shrug.
                         ok = reject("The archive contains an unexpected entry: '"
                             + std::string(name) + "'. Only a Tsubomi game "
-                              "transfer archive can be imported here.");
+                                                  "transfer archive can be imported here.");
                         break;
                     }
 
-                    const unsigned unix_type =
-                        (stat.m_external_attr >> 16) & 0170000;
+                    const unsigned unix_type = (stat.m_external_attr >> 16) & 0170000;
                     if (unix_type == 0120000 || stat.m_uncomp_size > (128ULL << 30)
                         || total_size > (256ULL << 30) - stat.m_uncomp_size) {
                         ok = false;
                         break;
                     }
                     total_size += stat.m_uncomp_size;
-                    const fs::path output =
-                        staging / fs::path(std::string(name));
+                    const fs::path output = staging / fs::path(std::string(name));
                     if (mz_zip_reader_is_file_a_directory(&zip, index)) {
                         fs::create_directories(output, error);
                     } else {
                         fs::create_directories(output.parent_path(), error);
-                        const std::string output_text =
-                            fs_utils::path_to_utf8(output);
+                        const std::string output_text = fs_utils::path_to_utf8(output);
                         if (!error
                             && !mz_zip_reader_extract_to_file(
                                 &zip, index, output_text.c_str(), 0))
@@ -1923,13 +1902,13 @@ void start_library_archive_import(EmuEnvState &emuenv,
                             if (error)
                                 return reject_ec(("Could not prepare a place for '"
                                                      + identifier + "'")
-                                        .c_str(),
+                                                     .c_str(),
                                     error);
                             fs::remove_all(backup, error);
                             if (error)
                                 return reject_ec(("Could not clear the backup for '"
                                                      + identifier + "'")
-                                        .c_str(),
+                                                     .c_str(),
                                     error);
                             // The probe needs its own error_code. Boost reports
                             // a missing path through `error`, so sharing it
@@ -1951,7 +1930,7 @@ void start_library_archive_import(EmuEnvState &emuenv,
                                 }
                                 return reject_ec(("Could not move '" + identifier
                                                      + "' into place")
-                                        .c_str(),
+                                                     .c_str(),
                                     error);
                             }
                             installed.push_back({ destination, backup });
@@ -1986,7 +1965,7 @@ void start_library_archive_import(EmuEnvState &emuenv,
                 } else {
                     const std::size_t playtimes = has_playtime
                         ? restore_playtimes_from_directory(
-                            emuenv, staging / "meta/playtime")
+                              emuenv, staging / "meta/playtime")
                         : 0;
                     // Play time is bookkeeping, not content. Discarding a
                     // fully installed library because the clock could not be
@@ -2073,8 +2052,40 @@ void start_import(EmuEnvState &emuenv, const std::string &path, const bool firmw
                     : "Import failed: " + result.detail;
                 if (!result.success)
                     LOG_ERROR("iOS archive install rejected: {}", result.detail);
+                if (result.success) {
+                    // Filesystem bundles may already contain their license.
+                    // Merely copying those trees leaves PFS content encrypted,
+                    // and the later license prompt skips titles with a RIF.
+                    for (const auto &application : result.installed_applications) {
+                        if (!application.title_id.starts_with("PCS")
+                            || application.content_id.empty()
+                            || !std::ranges::all_of(application.content_id, [](unsigned char c) {
+                                   return std::isalnum(c) || c == '-' || c == '_';
+                               }))
+                            continue;
+                        const fs::path title = emuenv.vita_fs_path / application.install_target;
+                        if (!fs::exists(title / "sce_pfs/files.db"))
+                            continue;
+                        const fs::path license = emuenv.vita_fs_path / "ux0/license"
+                            / application.title_id / (application.content_id + ".rif");
+                        if (!fs::exists(license)) {
+                            job->needs_attention = true;
+                            job->message += "; encrypted content needs its matching work.bin";
+                            continue;
+                        }
+                        if (fs::file_size(license) < sizeof(SceNpDrmLicense)
+                            || !decrypt_install_nonpdrm(emuenv, license, title)) {
+                            job->success = false;
+                            job->message = "Imported files, but content decryption failed for "
+                                + application.title_id + " (see tsubomi.log)";
+                            break;
+                        }
+                        LOG_INFO("iOS archive import decrypted bundled-license title {}", application.title_id);
+                    }
+                }
             }
         } catch (const std::exception &error) {
+            job->success = false;
             job->message = std::string("Import failed: ") + error.what();
         }
         boost::system::error_code cleanup_error;
@@ -2146,8 +2157,7 @@ std::vector<Vita3KIOSGameEntry> native_games(EmuEnvState &emuenv) {
         const fs::path art_directory = emuenv.vita_fs_path / "ux0/app" / entry.title_id / "sce_sys";
         const fs::path icon = art_directory / "icon0.png";
         const fs::path banner = art_directory / "pic0.png";
-        fs::path live_area_contents =
-            art_directory / "retail/livearea/contents";
+        fs::path live_area_contents = art_directory / "retail/livearea/contents";
         if (!fs::exists(live_area_contents / "template.xml"))
             live_area_contents = art_directory / "livearea/contents";
         if (!fs::exists(live_area_contents / "template.xml"))
@@ -2408,7 +2418,7 @@ std::optional<AppLaunchRequest> choose_boot_title(EmuEnvState &emuenv) {
                     ? std::optional(action->settings)
                     : std::nullopt;
                 vita3k_ios_hide_library();
-                return AppLaunchRequest{.app_path = action->app_path};
+                return AppLaunchRequest{ .app_path = action->app_path };
             case Vita3KIOSFrontendActionKind::Refresh: {
                 LOG_INFO("Rescanning iOS game library");
                 const bool refreshed = app::init_apps_list(emuenv);
@@ -2461,7 +2471,8 @@ std::optional<AppLaunchRequest> choose_boot_title(EmuEnvState &emuenv) {
                 vita3k_ios_report_import_result(
                     copied ? (decrypted ? "License installed; content decrypted"
                                         : "License installed")
-                           : "License import failed (see tsubomi.log)", copied);
+                           : "License import failed (see tsubomi.log)",
+                    copied);
                 break;
             }
             case Vita3KIOSFrontendActionKind::ImportSave:
@@ -2584,8 +2595,7 @@ void fatal_signal_handler(int sig, siginfo_t *info, void *uct) {
             context->uc_mcontext->__ss.__x[0] = 0;
             context->uc_mcontext->__ss.__pc = pc + sizeof(std::uint32_t);
             g_unhandled_universal_jit_breakpoint.store(true, std::memory_order_relaxed);
-            static constexpr char message[] =
-                "Tsubomi: StikDebug detached during universal JIT preparation; aborting launch safely.\n";
+            static constexpr char message[] = "Tsubomi: StikDebug detached during universal JIT preparation; aborting launch safely.\n";
             write(STDERR_FILENO, message, sizeof(message) - 1);
             return;
         }
@@ -2678,8 +2688,7 @@ bool prepare_ios_jit_pool() {
 
     g_unhandled_universal_jit_breakpoint.store(false, std::memory_order_relaxed);
     try {
-        const std::size_t warmed_jit_regions =
-            prewarm_ios_jit_code_cache_pool(IOS_JIT_POOL_TARGET, IOS_JIT_CACHE_SIZE);
+        const std::size_t warmed_jit_regions = prewarm_ios_jit_code_cache_pool(IOS_JIT_POOL_TARGET, IOS_JIT_CACHE_SIZE);
         if (warmed_jit_regions < IOS_JIT_POOL_TARGET) {
             LOG_CRITICAL("iOS JIT region pool is under target: target={} available={}",
                 IOS_JIT_POOL_TARGET, warmed_jit_regions);
@@ -2784,345 +2793,345 @@ int main(int argc, char *argv[]) {
     bool jit_pool_prewarmed = g_jit_pool_ready.load(std::memory_order_relaxed);
     std::optional<AppLaunchRequest> pending_relaunch;
     while (!app_terminating) {
-    auto launch_request = pending_relaunch
-        ? std::exchange(pending_relaunch, std::nullopt)
-        : choose_boot_title(*emuenv);
-    if (!launch_request)
-        break;
+        auto launch_request = pending_relaunch
+            ? std::exchange(pending_relaunch, std::nullopt)
+            : choose_boot_title(*emuenv);
+        if (!launch_request)
+            break;
 
-    // Per-game override: snapshot the runtime config, apply the override for
-    // this session only, and restore the snapshot when the session ends.
-    const auto session_settings = std::exchange(g_pending_game_settings, std::nullopt);
-    const auto saved_current_config = emuenv->cfg.current_config;
-    const auto restore_global_config = [&] {
-        // Session-only overrides (including title compatibility overrides)
-        // must never leak into the next game or get persisted globally.
-        emuenv->cfg.current_config = saved_current_config;
-        emuenv->display.fps_limit.store(60, std::memory_order_relaxed);
-    };
+        // Per-game override: snapshot the runtime config, apply the override for
+        // this session only, and restore the snapshot when the session ends.
+        const auto session_settings = std::exchange(g_pending_game_settings, std::nullopt);
+        const auto saved_current_config = emuenv->cfg.current_config;
+        const auto restore_global_config = [&] {
+            // Session-only overrides (including title compatibility overrides)
+            // must never leak into the next game or get persisted globally.
+            emuenv->cfg.current_config = saved_current_config;
+            emuenv->display.fps_limit.store(60, std::memory_order_relaxed);
+        };
 
-    app::AppSessionController session_controller(*emuenv);
-    SDL_Log("Vita3K iOS: begin_launch '%s'", launch_request->app_path.c_str());
-    if (!session_controller.begin_launch(*launch_request)) {
-        LOG_ERROR("Could not prepare app '{}' for launch.", launch_request->app_path);
-        restore_global_config();
-        vita3k_ios_show_boot_error(
-            "Tsubomi could not prepare this game. The failed launch was cleaned up; try again, "
-            "and export tsubomi.log plus the iOS crash report if it repeats.");
-        continue;
-    }
-    // begin_launch() selects the title's upstream config profile. Apply the
-    // native per-game override afterwards so setup_game_launch() cannot
-    // overwrite it before Vulkan and the runtime read current_config.
-    if (session_settings)
-        apply_game_session_settings(*emuenv, *session_settings);
+        app::AppSessionController session_controller(*emuenv);
+        SDL_Log("Vita3K iOS: begin_launch '%s'", launch_request->app_path.c_str());
+        if (!session_controller.begin_launch(*launch_request)) {
+            LOG_ERROR("Could not prepare app '{}' for launch.", launch_request->app_path);
+            restore_global_config();
+            vita3k_ios_show_boot_error(
+                "Tsubomi could not prepare this game. The failed launch was cleaned up; try again, "
+                "and export tsubomi.log plus the iOS crash report if it repeats.");
+            continue;
+        }
+        // begin_launch() selects the title's upstream config profile. Apply the
+        // native per-game override afterwards so setup_game_launch() cannot
+        // overwrite it before Vulkan and the runtime read current_config.
+        if (session_settings)
+            apply_game_session_settings(*emuenv, *session_settings);
 
-    IOSFrameHost frame_host(window);
+        IOSFrameHost frame_host(window);
 
-    // A failed launch (bad renderer init, encrypted/undecryptable content, a
-    // throwing loader) must return to the library with an explanation instead
-    // of tearing the whole app down (the old "Unhandled std::terminate()").
-    std::string boot_error;
-    try {
-        SDL_Log("Vita3K iOS: initialize_renderer (Vulkan/MoltenVK)");
-        if (!session_controller.initialize_renderer(frame_host)) {
-            boot_error = "Could not initialise the graphics renderer.";
-        } else {
-            SDL_Log("Vita3K iOS: initialize_runtime (kernel/CPU - requires JIT)");
-            if (!session_controller.initialize_runtime()) {
-                boot_error = "Could not initialise the emulator runtime or reserve guest memory. "
-                             "Restart Tsubomi, re-enable JIT in StikDebug, and try again.";
+        // A failed launch (bad renderer init, encrypted/undecryptable content, a
+        // throwing loader) must return to the library with an explanation instead
+        // of tearing the whole app down (the old "Unhandled std::terminate()").
+        std::string boot_error;
+        try {
+            SDL_Log("Vita3K iOS: initialize_renderer (Vulkan/MoltenVK)");
+            if (!session_controller.initialize_renderer(frame_host)) {
+                boot_error = "Could not initialise the graphics renderer.";
             } else {
-                // Prepare every JIT mapping the session is expected to need
-                // while StikDebug is known to be attached. iOS 26 keeps these
-                // RX/RW aliases executable after the debugger app is suspended.
-                if (!jit_pool_prewarmed && !prepare_ios_jit_pool()) {
-                    boot_error = "StikDebug detached while Tsubomi was preparing JIT. Re-enable JIT, keep "
-                                 "StikDebug attached until preparation completes, then try again.";
-                    vita3k_ios_set_jit_available(false);
+                SDL_Log("Vita3K iOS: initialize_runtime (kernel/CPU - requires JIT)");
+                if (!session_controller.initialize_runtime()) {
+                    boot_error = "Could not initialise the emulator runtime or reserve guest memory. "
+                                 "Restart Tsubomi, re-enable JIT in StikDebug, and try again.";
                 } else {
-                    jit_pool_prewarmed = true;
+                    // Prepare every JIT mapping the session is expected to need
+                    // while StikDebug is known to be attached. iOS 26 keeps these
+                    // RX/RW aliases executable after the debugger app is suspended.
+                    if (!jit_pool_prewarmed && !prepare_ios_jit_pool()) {
+                        boot_error = "StikDebug detached while Tsubomi was preparing JIT. Re-enable JIT, keep "
+                                     "StikDebug attached until preparation completes, then try again.";
+                        vita3k_ios_set_jit_available(false);
+                    } else {
+                        jit_pool_prewarmed = true;
+                    }
+
+                    if (boot_error.empty())
+                        SDL_Log("Vita3K iOS: load_and_run");
+                    if (boot_error.empty() && !session_controller.load_and_run())
+                        boot_error = "Could not load or start the game. If this is a retail dump, the "
+                                     "content may still be encrypted — import the .pkg with its "
+                                     "work.bin/zRIF instead of a pre-extracted copy.";
+                }
+            }
+        } catch (const std::exception &error) {
+            if (!jit_pool_prewarmed
+                && (g_unhandled_universal_jit_breakpoint.exchange(false, std::memory_order_relaxed)
+                    || !ios_debugger_attached())) {
+                boot_error = "StikDebug detached while Tsubomi was preparing JIT. Re-enable JIT, keep "
+                             "StikDebug attached until preparation completes, then try again.";
+                vita3k_ios_set_jit_available(false);
+            } else {
+                boot_error = std::string("The game crashed during startup: ") + error.what();
+            }
+        } catch (...) {
+            boot_error = "The game crashed during startup.";
+        }
+
+        if (!boot_error.empty()) {
+            LOG_ERROR("iOS boot failed: {}", boot_error);
+            session_controller.stop(app::AppSessionStopReason::UserRequest);
+            emuenv->audio.adapter.reset();
+            emuenv->audio.audio_backend.clear();
+            restore_global_config();
+            vita3k_ios_show_boot_error(boot_error);
+            continue;
+        }
+
+        LOG_INFO("Game started: {} ({})", emuenv->current_app_title, launch_request->app_path);
+        // Never inherit the removed iOS FPS-hack setting from an older config.
+        emuenv->display.fps_hack = false;
+        emuenv->display.fps_limit.store(60, std::memory_order_relaxed);
+
+        const bool has_virtual_controller = vita3k_ios_attach_virtual_controller();
+        if (has_virtual_controller) {
+            // Register the virtual joystick immediately instead of waiting for the
+            // queued SDL_EVENT_GAMEPAD_ADDED. It is merged with any physical pad
+            // by the normal sceCtrl polling path.
+            refresh_controllers(emuenv->ctrl, *emuenv);
+            LOG_INFO("iOS virtual controller ready: {} total controller(s)", emuenv->ctrl.controllers_num);
+            vita3k_ios_set_physical_controller_connected(has_physical_controller(emuenv->ctrl));
+            vita3k_ios_show_virtual_controller();
+        }
+
+        // Run the guest watchdog on its own host thread. Keeping it in the SDL
+        // event loop meant a blocked frontend call could suppress the very dump
+        // needed to diagnose the hang. The early two-second sample catches the
+        // first CRI filesystem worker even if iOS is backgrounded soon afterward.
+        std::atomic_bool stop_guest_watchdog = false;
+        std::thread guest_watchdog([&] {
+            using namespace std::chrono_literals;
+
+            const Uint64 watchdog_start_ms = SDL_GetTicks();
+            constexpr Uint64 scheduled_dump_at_ms[] = { 2000, 3000, 10000, 30000, 60000, 180000 };
+            std::size_t next_scheduled_dump = 0;
+            uint64_t last_setframe_seen = emuenv->display.last_setframe_vblank_count.load();
+            Uint64 last_setframe_change_ms = watchdog_start_ms;
+            Uint64 next_stall_dump_ms = watchdog_start_ms + 8000;
+            // Per session, not a function-local static: a static carried the
+            // previous title's timestamp into the next launch.
+            Uint64 last_mem_log_ms = 0;
+
+            LOG_INFO("iOS guest watchdog started: first snapshot at {}ms", scheduled_dump_at_ms[0]);
+
+            while (!stop_guest_watchdog.load(std::memory_order_relaxed)) {
+                const bool scheduled_diagnostics_complete = next_scheduled_dump >= std::size(scheduled_dump_at_ms);
+                std::this_thread::sleep_for(scheduled_diagnostics_complete ? 1s : 250ms);
+                if (stop_guest_watchdog.load(std::memory_order_relaxed))
+                    break;
+
+                const Uint64 now_ms = SDL_GetTicks();
+                const uint64_t setframe_count = emuenv->display.last_setframe_vblank_count.load();
+                if (setframe_count != last_setframe_seen) {
+                    last_setframe_seen = setframe_count;
+                    last_setframe_change_ms = now_ms;
                 }
 
-                if (boot_error.empty())
-                    SDL_Log("Vita3K iOS: load_and_run");
-                if (boot_error.empty() && !session_controller.load_and_run())
-                    boot_error = "Could not load or start the game. If this is a retail dump, the "
-                                 "content may still be encrypted — import the .pkg with its "
-                                 "work.bin/zRIF instead of a pre-extracted copy.";
-            }
-        }
-    } catch (const std::exception &error) {
-        if (!jit_pool_prewarmed
-            && (g_unhandled_universal_jit_breakpoint.exchange(false, std::memory_order_relaxed)
-                || !ios_debugger_attached())) {
-            boot_error = "StikDebug detached while Tsubomi was preparing JIT. Re-enable JIT, keep "
-                         "StikDebug attached until preparation completes, then try again.";
-            vita3k_ios_set_jit_available(false);
-        } else {
-            boot_error = std::string("The game crashed during startup: ") + error.what();
-        }
-    } catch (...) {
-        boot_error = "The game crashed during startup.";
-    }
+                // Sample the OS memory headroom periodically. If a freeze is really
+                // a jetsam kill, the log shows this number collapsing toward zero
+                // right before the process dies (no signal is delivered for jetsam).
+                if (now_ms - last_mem_log_ms >= 10000) {
+                    last_mem_log_ms = now_ms;
+                    LOG_INFO("iOS memory headroom: {} MiB available before jetsam",
+                        static_cast<unsigned long long>(os_proc_available_memory() / (1024 * 1024)));
+                }
 
-    if (!boot_error.empty()) {
-        LOG_ERROR("iOS boot failed: {}", boot_error);
-        session_controller.stop(app::AppSessionStopReason::UserRequest);
+                if (next_scheduled_dump < std::size(scheduled_dump_at_ms)
+                    && now_ms - watchdog_start_ms >= scheduled_dump_at_ms[next_scheduled_dump]) {
+                    LOG_INFO("iOS guest watchdog snapshot firing at {}ms", scheduled_dump_at_ms[next_scheduled_dump]);
+                    app::dump_guest_state(*emuenv, "scheduled iOS boot diagnostic");
+                    ++next_scheduled_dump;
+                }
+
+                if (now_ms - last_setframe_change_ms >= 8000 && now_ms >= next_stall_dump_ms) {
+                    app::dump_guest_state(*emuenv, "no sceDisplaySetFrameBuf progress for 8s");
+                    next_stall_dump_ms = now_ms + 30000;
+                }
+
+                // Retire once the scheduled snapshots are done and the title is
+                // presenting: everything this thread exists to catch happens during
+                // boot. A session is played for hours, and a wake-up every second
+                // for all of it - each one touching the log - is a battery cost
+                // paid for a diagnostic that has already answered its question.
+                if (next_scheduled_dump >= std::size(scheduled_dump_at_ms)
+                    && last_setframe_seen != 0
+                    && now_ms - last_setframe_change_ms < 8000) {
+                    LOG_INFO("iOS guest watchdog retiring: boot diagnostics complete, title is presenting frames");
+                    break;
+                }
+            }
+        });
+
+        Uint64 perf_last_ms = SDL_GetTicks();
+        std::size_t perf_last_frame_count = emuenv->frame_count;
+        Uint64 playtime_checkpoint_ms = perf_last_ms;
+
+        bool running = true;
+        while (running) {
+            SDL_Event event;
+            while (SDL_PollEvent(&event)) {
+                switch (event.type) {
+                case SDL_EVENT_TERMINATING:
+                    app_terminating = true;
+                    running = false;
+                    break;
+
+                case SDL_EVENT_QUIT:
+                case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+                    // In-game menu "Quit Game" pushes SDL_EVENT_QUIT: end the
+                    // session and fall back to the library.
+                    running = false;
+                    break;
+
+                case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                case SDL_EVENT_WINDOW_RESIZED: {
+                    int drawable_width = 0;
+                    int drawable_height = 0;
+                    SDL_GetWindowSizeInPixels(window, &drawable_width, &drawable_height);
+                    LOG_INFO("iOS window resized: drawable={}x{} layout={}",
+                        drawable_width, drawable_height,
+                        drawable_height > drawable_width ? "portrait" : "landscape");
+                    // MoltenVK does not reliably report the swapchain as
+                    // out-of-date after a rotation; it scales the stale-extent
+                    // swapchain to the layer instead (nearest-filtered, visibly
+                    // pixelated). Force a rebuild at the new drawable size.
+                    if (emuenv->renderer)
+                        emuenv->renderer->request_screen_rebuild();
+                    break;
+                }
+
+                case SDL_EVENT_FINGER_DOWN:
+                case SDL_EVENT_FINGER_MOTION:
+                case SDL_EVENT_FINGER_UP: {
+                    if (!vita3k_ios_vita_touchscreen_enabled()) {
+                        // The dynamic joystick owns the whole screen, so the
+                        // overlay normally swallows these before SDL ever sees
+                        // them. One can still arrive from a finger that was
+                        // already down when the mode changed, or from outside the
+                        // overlay's bounds; drop it, and drop any contact the
+                        // guest is still holding, so the panel reads as untouched.
+                        if (emuenv->touch.finger_count != 0)
+                            emuenv->touch.finger_count = 0;
+                        break;
+                    }
+                    handle_touch_event(emuenv->touch, event.tfinger);
+                    if (event.type != SDL_EVENT_FINGER_MOTION) {
+                        LOG_DEBUG("iOS Vita touch {}: finger={} x={:.4f} y={:.4f} active={}",
+                            event.type == SDL_EVENT_FINGER_DOWN ? "down" : "up",
+                            static_cast<std::uint64_t>(event.tfinger.fingerID),
+                            event.tfinger.x, event.tfinger.y,
+                            static_cast<unsigned>(emuenv->touch.finger_count));
+                    }
+                    auto &mouse = emuenv->ctrl.overlay_mouse;
+                    mouse.x.store(event.tfinger.x * 960.f, std::memory_order_relaxed);
+                    mouse.y.store(event.tfinger.y * 544.f, std::memory_order_relaxed);
+                    mouse.pressed.store(event.type != SDL_EVENT_FINGER_UP, std::memory_order_relaxed);
+                    break;
+                }
+
+                case SDL_EVENT_GAMEPAD_ADDED:
+                case SDL_EVENT_GAMEPAD_REMOVED:
+                    refresh_controllers(emuenv->ctrl, *emuenv);
+                    vita3k_ios_set_physical_controller_connected(has_physical_controller(emuenv->ctrl));
+                    LOG_INFO("iOS controller refresh: {} connected controller(s)", emuenv->ctrl.controllers_num);
+                    break;
+
+                case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+                    // Vita inputs are polled from SDL by sceCtrl; this breadcrumb
+                    // proves the host controller event reached the iOS frontend.
+                    LOG_DEBUG("iOS gamepad button down: gamepad={} button={}",
+                        event.gbutton.which, static_cast<int>(event.gbutton.button));
+                    break;
+
+                case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
+                case SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION:
+                case SDL_EVENT_GAMEPAD_TOUCHPAD_UP:
+                    handle_touchpad_event(emuenv->touch, event.gtouchpad);
+                    break;
+
+                default:
+                    break;
+                }
+            }
+
+            {
+                const Uint64 now_ms = SDL_GetTicks();
+                if (now_ms - perf_last_ms >= 1000) {
+                    const std::size_t frames = emuenv->frame_count;
+                    const float fps = static_cast<float>(frames - perf_last_frame_count) * 1000.0f
+                        / static_cast<float>(now_ms - perf_last_ms);
+                    perf_last_frame_count = frames;
+                    perf_last_ms = now_ms;
+                    const float frametime_ms = fps > 0.01f ? 1000.0f / fps : 0.0f;
+                    vita3k_ios_update_perf_overlay(fps, frametime_ms);
+                }
+                // Persist progress periodically, not only on a clean in-app quit.
+                // iOS users commonly terminate a stalled title from the app
+                // switcher, which previously discarded the whole session length.
+                // Every minute: the worst case is a minute of playtime lost to a
+                // force-quit, against half as many flash writes as a thirty-second
+                // checkpoint across a long session.
+                if (now_ms - playtime_checkpoint_ms >= 60000) {
+                    app::update_app_time_used(*emuenv, emuenv->io.app_path);
+                    playtime_checkpoint_ms = now_ms;
+                }
+            }
+
+            if (auto action = vita3k_ios_take_frontend_action()) {
+                if (action->kind == Vita3KIOSFrontendActionKind::ShowTrophies)
+                    show_trophies(*emuenv, g_current_trophy_id, g_current_title,
+                        g_current_title_id, false);
+            }
+
+            if (auto request = emuenv->take_app_launch_request()) {
+                // sceAppMgrLoadExec asks the frontend to replace the current
+                // process image (for example Golden Abyss' small eboot.bin launcher
+                // hands off to app0:uncharted.self). Reuse the normal session
+                // teardown/startup path instead of dropping back to the library.
+                LOG_INFO("Title requested LoadExec relaunch: app='{}' self='{}'",
+                    request->app_path, request->self_path);
+                pending_relaunch = std::move(*request);
+                running = false;
+            }
+
+            if (!session_controller.is_running())
+                running = false;
+
+            // Service UIKit (virtual controller, in-game glass menu, perf overlay)
+            // instead of a blind sleep so touch controls stay responsive.
+            if (running)
+                vita3k_ios_pump_runloop(0.016);
+        }
+
+        LOG_INFO("Shutting down game");
+        stop_guest_watchdog.store(true, std::memory_order_relaxed);
+        guest_watchdog.join();
+        vita3k_ios_hide_perf_overlay();
+        vita3k_ios_hide_virtual_controller();
+        session_controller.stop(app_terminating
+                ? app::AppSessionStopReason::FrontendShutdown
+                : (pending_relaunch ? app::AppSessionStopReason::Relaunch
+                                    : app::AppSessionStopReason::UserRequest));
+        if (has_virtual_controller)
+            vita3k_ios_detach_virtual_controller();
+
+        // Match the Android frontend: drop the SDL audio adapter so the next
+        // session opens a fresh device instead of reusing torn-down state.
         emuenv->audio.adapter.reset();
         emuenv->audio.audio_backend.clear();
         restore_global_config();
-        vita3k_ios_show_boot_error(boot_error);
-        continue;
-    }
 
-    LOG_INFO("Game started: {} ({})", emuenv->current_app_title, launch_request->app_path);
-    // Never inherit the removed iOS FPS-hack setting from an older config.
-    emuenv->display.fps_hack = false;
-    emuenv->display.fps_limit.store(60, std::memory_order_relaxed);
-
-    const bool has_virtual_controller = vita3k_ios_attach_virtual_controller();
-    if (has_virtual_controller) {
-        // Register the virtual joystick immediately instead of waiting for the
-        // queued SDL_EVENT_GAMEPAD_ADDED. It is merged with any physical pad
-        // by the normal sceCtrl polling path.
-        refresh_controllers(emuenv->ctrl, *emuenv);
-        LOG_INFO("iOS virtual controller ready: {} total controller(s)", emuenv->ctrl.controllers_num);
-        vita3k_ios_set_physical_controller_connected(has_physical_controller(emuenv->ctrl));
-        vita3k_ios_show_virtual_controller();
-    }
-
-    // Run the guest watchdog on its own host thread. Keeping it in the SDL
-    // event loop meant a blocked frontend call could suppress the very dump
-    // needed to diagnose the hang. The early two-second sample catches the
-    // first CRI filesystem worker even if iOS is backgrounded soon afterward.
-    std::atomic_bool stop_guest_watchdog = false;
-    std::thread guest_watchdog([&] {
-        using namespace std::chrono_literals;
-
-        const Uint64 watchdog_start_ms = SDL_GetTicks();
-        constexpr Uint64 scheduled_dump_at_ms[] = { 2000, 3000, 10000, 30000, 60000, 180000 };
-        std::size_t next_scheduled_dump = 0;
-        uint64_t last_setframe_seen = emuenv->display.last_setframe_vblank_count.load();
-        Uint64 last_setframe_change_ms = watchdog_start_ms;
-        Uint64 next_stall_dump_ms = watchdog_start_ms + 8000;
-        // Per session, not a function-local static: a static carried the
-        // previous title's timestamp into the next launch.
-        Uint64 last_mem_log_ms = 0;
-
-        LOG_INFO("iOS guest watchdog started: first snapshot at {}ms", scheduled_dump_at_ms[0]);
-
-        while (!stop_guest_watchdog.load(std::memory_order_relaxed)) {
-            const bool scheduled_diagnostics_complete = next_scheduled_dump >= std::size(scheduled_dump_at_ms);
-            std::this_thread::sleep_for(scheduled_diagnostics_complete ? 1s : 250ms);
-            if (stop_guest_watchdog.load(std::memory_order_relaxed))
-                break;
-
-            const Uint64 now_ms = SDL_GetTicks();
-            const uint64_t setframe_count = emuenv->display.last_setframe_vblank_count.load();
-            if (setframe_count != last_setframe_seen) {
-                last_setframe_seen = setframe_count;
-                last_setframe_change_ms = now_ms;
-            }
-
-            // Sample the OS memory headroom periodically. If a freeze is really
-            // a jetsam kill, the log shows this number collapsing toward zero
-            // right before the process dies (no signal is delivered for jetsam).
-            if (now_ms - last_mem_log_ms >= 10000) {
-                last_mem_log_ms = now_ms;
-                LOG_INFO("iOS memory headroom: {} MiB available before jetsam",
-                    static_cast<unsigned long long>(os_proc_available_memory() / (1024 * 1024)));
-            }
-
-            if (next_scheduled_dump < std::size(scheduled_dump_at_ms)
-                && now_ms - watchdog_start_ms >= scheduled_dump_at_ms[next_scheduled_dump]) {
-                LOG_INFO("iOS guest watchdog snapshot firing at {}ms", scheduled_dump_at_ms[next_scheduled_dump]);
-                app::dump_guest_state(*emuenv, "scheduled iOS boot diagnostic");
-                ++next_scheduled_dump;
-            }
-
-            if (now_ms - last_setframe_change_ms >= 8000 && now_ms >= next_stall_dump_ms) {
-                app::dump_guest_state(*emuenv, "no sceDisplaySetFrameBuf progress for 8s");
-                next_stall_dump_ms = now_ms + 30000;
-            }
-
-            // Retire once the scheduled snapshots are done and the title is
-            // presenting: everything this thread exists to catch happens during
-            // boot. A session is played for hours, and a wake-up every second
-            // for all of it - each one touching the log - is a battery cost
-            // paid for a diagnostic that has already answered its question.
-            if (next_scheduled_dump >= std::size(scheduled_dump_at_ms)
-                && last_setframe_seen != 0
-                && now_ms - last_setframe_change_ms < 8000) {
-                LOG_INFO("iOS guest watchdog retiring: boot diagnostics complete, title is presenting frames");
-                break;
-            }
-        }
-    });
-
-    Uint64 perf_last_ms = SDL_GetTicks();
-    std::size_t perf_last_frame_count = emuenv->frame_count;
-    Uint64 playtime_checkpoint_ms = perf_last_ms;
-
-    bool running = true;
-    while (running) {
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            switch (event.type) {
-            case SDL_EVENT_TERMINATING:
-                app_terminating = true;
-                running = false;
-                break;
-
-            case SDL_EVENT_QUIT:
-            case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-                // In-game menu "Quit Game" pushes SDL_EVENT_QUIT: end the
-                // session and fall back to the library.
-                running = false;
-                break;
-
-            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-            case SDL_EVENT_WINDOW_RESIZED: {
-                int drawable_width = 0;
-                int drawable_height = 0;
-                SDL_GetWindowSizeInPixels(window, &drawable_width, &drawable_height);
-                LOG_INFO("iOS window resized: drawable={}x{} layout={}",
-                    drawable_width, drawable_height,
-                    drawable_height > drawable_width ? "portrait" : "landscape");
-                // MoltenVK does not reliably report the swapchain as
-                // out-of-date after a rotation; it scales the stale-extent
-                // swapchain to the layer instead (nearest-filtered, visibly
-                // pixelated). Force a rebuild at the new drawable size.
-                if (emuenv->renderer)
-                    emuenv->renderer->request_screen_rebuild();
-                break;
-            }
-
-            case SDL_EVENT_FINGER_DOWN:
-            case SDL_EVENT_FINGER_MOTION:
-            case SDL_EVENT_FINGER_UP: {
-                if (!vita3k_ios_vita_touchscreen_enabled()) {
-                    // The dynamic joystick owns the whole screen, so the
-                    // overlay normally swallows these before SDL ever sees
-                    // them. One can still arrive from a finger that was
-                    // already down when the mode changed, or from outside the
-                    // overlay's bounds; drop it, and drop any contact the
-                    // guest is still holding, so the panel reads as untouched.
-                    if (emuenv->touch.finger_count != 0)
-                        emuenv->touch.finger_count = 0;
-                    break;
-                }
-                handle_touch_event(emuenv->touch, event.tfinger);
-                if (event.type != SDL_EVENT_FINGER_MOTION) {
-                    LOG_DEBUG("iOS Vita touch {}: finger={} x={:.4f} y={:.4f} active={}",
-                        event.type == SDL_EVENT_FINGER_DOWN ? "down" : "up",
-                        static_cast<std::uint64_t>(event.tfinger.fingerID),
-                        event.tfinger.x, event.tfinger.y,
-                        static_cast<unsigned>(emuenv->touch.finger_count));
-                }
-                auto &mouse = emuenv->ctrl.overlay_mouse;
-                mouse.x.store(event.tfinger.x * 960.f, std::memory_order_relaxed);
-                mouse.y.store(event.tfinger.y * 544.f, std::memory_order_relaxed);
-                mouse.pressed.store(event.type != SDL_EVENT_FINGER_UP, std::memory_order_relaxed);
-                break;
-            }
-
-            case SDL_EVENT_GAMEPAD_ADDED:
-            case SDL_EVENT_GAMEPAD_REMOVED:
-                refresh_controllers(emuenv->ctrl, *emuenv);
-                vita3k_ios_set_physical_controller_connected(has_physical_controller(emuenv->ctrl));
-                LOG_INFO("iOS controller refresh: {} connected controller(s)", emuenv->ctrl.controllers_num);
-                break;
-
-            case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-                // Vita inputs are polled from SDL by sceCtrl; this breadcrumb
-                // proves the host controller event reached the iOS frontend.
-                LOG_DEBUG("iOS gamepad button down: gamepad={} button={}",
-                    event.gbutton.which, static_cast<int>(event.gbutton.button));
-                break;
-
-            case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
-            case SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION:
-            case SDL_EVENT_GAMEPAD_TOUCHPAD_UP:
-                handle_touchpad_event(emuenv->touch, event.gtouchpad);
-                break;
-
-            default:
-                break;
-            }
-        }
-
-        {
-            const Uint64 now_ms = SDL_GetTicks();
-            if (now_ms - perf_last_ms >= 1000) {
-                const std::size_t frames = emuenv->frame_count;
-                const float fps = static_cast<float>(frames - perf_last_frame_count) * 1000.0f
-                    / static_cast<float>(now_ms - perf_last_ms);
-                perf_last_frame_count = frames;
-                perf_last_ms = now_ms;
-                const float frametime_ms = fps > 0.01f ? 1000.0f / fps : 0.0f;
-                vita3k_ios_update_perf_overlay(fps, frametime_ms);
-            }
-            // Persist progress periodically, not only on a clean in-app quit.
-            // iOS users commonly terminate a stalled title from the app
-            // switcher, which previously discarded the whole session length.
-            // Every minute: the worst case is a minute of playtime lost to a
-            // force-quit, against half as many flash writes as a thirty-second
-            // checkpoint across a long session.
-            if (now_ms - playtime_checkpoint_ms >= 60000) {
-                app::update_app_time_used(*emuenv, emuenv->io.app_path);
-                playtime_checkpoint_ms = now_ms;
-            }
-        }
-
-        if (auto action = vita3k_ios_take_frontend_action()) {
-            if (action->kind == Vita3KIOSFrontendActionKind::ShowTrophies)
-                show_trophies(*emuenv, g_current_trophy_id, g_current_title,
-                    g_current_title_id, false);
-        }
-
-        if (auto request = emuenv->take_app_launch_request()) {
-            // sceAppMgrLoadExec asks the frontend to replace the current
-            // process image (for example Golden Abyss' small eboot.bin launcher
-            // hands off to app0:uncharted.self). Reuse the normal session
-            // teardown/startup path instead of dropping back to the library.
-            LOG_INFO("Title requested LoadExec relaunch: app='{}' self='{}'",
-                request->app_path, request->self_path);
-            pending_relaunch = std::move(*request);
-            running = false;
-        }
-
-        if (!session_controller.is_running())
-            running = false;
-
-        // Service UIKit (virtual controller, in-game glass menu, perf overlay)
-        // instead of a blind sleep so touch controls stay responsive.
-        if (running)
-            vita3k_ios_pump_runloop(0.016);
-    }
-
-    LOG_INFO("Shutting down game");
-    stop_guest_watchdog.store(true, std::memory_order_relaxed);
-    guest_watchdog.join();
-    vita3k_ios_hide_perf_overlay();
-    vita3k_ios_hide_virtual_controller();
-    session_controller.stop(app_terminating
-            ? app::AppSessionStopReason::FrontendShutdown
-            : (pending_relaunch ? app::AppSessionStopReason::Relaunch
-                                : app::AppSessionStopReason::UserRequest));
-    if (has_virtual_controller)
-        vita3k_ios_detach_virtual_controller();
-
-    // Match the Android frontend: drop the SDL audio adapter so the next
-    // session opens a fresh device instead of reusing torn-down state.
-    emuenv->audio.adapter.reset();
-    emuenv->audio.audio_backend.clear();
-    restore_global_config();
-
-    if (pending_relaunch)
-        LOG_INFO("Restarting current title via LoadExec: self='{}'", pending_relaunch->self_path);
-    else
-        LOG_INFO("Returning to game library");
+        if (pending_relaunch)
+            LOG_INFO("Restarting current title via LoadExec: self='{}'", pending_relaunch->self_path);
+        else
+            LOG_INFO("Returning to game library");
     } // while (!app_terminating)
 
     SDL_DestroyWindow(window);

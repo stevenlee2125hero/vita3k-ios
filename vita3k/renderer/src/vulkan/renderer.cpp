@@ -946,6 +946,9 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
 }
 
 void VKState::late_init(const Config &cfg, const std::string_view game_id, MemState &mem) {
+#ifdef VITA3K_PLATFORM_IOS
+    LOG_INFO("iOS compatibility v21: stable blend lifetime; title-scoped packed RG32; exact material crops; synchronous pipelines");
+#endif
     this->mem = &mem;
 
     bool use_high_accuracy = cfg.current_config.high_accuracy;
@@ -960,12 +963,34 @@ void VKState::late_init(const Config &cfg, const std::string_view game_id, MemSt
     }
 
     // texture viewport is faster but not entirely accurate
-    if (support_standard_layout && !use_high_accuracy) {
+    features.use_texture_viewport = support_standard_layout && !use_high_accuracy;
+    if (features.use_texture_viewport) {
         LOG_INFO("The Vulkan renderer is using texture viewport for better performance");
-        features.use_texture_viewport = true;
     } else if (use_high_accuracy) {
         LOG_INFO("High accuracy enabled: texture viewport disabled");
     }
+
+#ifdef VITA3K_PLATFORM_IOS
+    // v20 fixed the branch-local blend attachment pointer responsible for
+    // malformed v18/v19 descriptors. Reset the packed policy on every launch:
+    // only Golden Abyss reinterprets this material target as raw color/normal
+    // words; Undertale and other games retain their proven float contract.
+    features.preserve_packed_rg32 = false;
+    if (game_id == "PCSD00001") {
+        features.preserve_packed_rg32 = true;
+        // The storage-image interlock path is floating-point. Packed RG32
+        // uses typed integer outputs and subpass fetch instead, preserving
+        // NaN/subnormal payloads without fixed-function numeric blending.
+        features.support_shader_interlock = false;
+        features.direct_fragcolor = true;
+        // A viewport transform selects an atlas region but does not reproduce
+        // clamp/repeat at that region's edges. Golden Abyss uses cropped
+        // render targets as material textures: give the sampler an actual
+        // image with the guest extent instead of wrapping the whole target.
+        features.use_texture_viewport = false;
+        LOG_INFO("Golden Abyss: exact GPU material crops and bit-preserving RG32 integer output enabled");
+    }
+#endif
 
     // parse the mapping method
     auto &config_mapping = cfg.current_config.memory_mapping;
@@ -1306,6 +1331,7 @@ uint32_t VKState::get_features_mask() {
             bool use_memory_mapping : 1;
             bool use_rgb_attributes : 1;
             bool use_scaled_attributes : 1;
+            bool preserve_packed_rg32 : 1;
         };
         uint32_t value;
     } features_mask;
@@ -1317,6 +1343,7 @@ uint32_t VKState::get_features_mask() {
     features_mask.use_memory_mapping = features.enable_memory_mapping;
     features_mask.use_rgb_attributes = features.support_rgb_attributes;
     features_mask.use_scaled_attributes = pipeline_cache.support_scaled_vertex_attribute;
+    features_mask.preserve_packed_rg32 = features.preserve_packed_rg32;
 
     return features_mask.value;
 }

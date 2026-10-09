@@ -133,7 +133,7 @@ void set_context(VKContext &context, MemState &mem, VKRenderTarget *rt, const Fe
     // set these values for the pipeline cache
     context.record.color_base_format = gxm::get_base_format(color_surface_fin->colorFormat);
     context.record.is_gamma_corrected = static_cast<bool>(color_surface_fin->gamma);
-    vk::Format vk_format = color::translate_format(context.record.color_base_format);
+    vk::Format vk_format = color::translate_format(context.record.color_base_format, features.preserve_packed_rg32);
 
     if (color_surface_fin->gamma && vk_format == vk::Format::eR8G8B8A8Unorm) {
         vk_format = vk::Format::eR8G8B8A8Srgb;
@@ -148,6 +148,9 @@ void set_context(VKContext &context, MemState &mem, VKRenderTarget *rt, const Fe
         context.record.is_gamma_corrected = false;
         context.record.is_maskupdate = false;
         context.record.color_base_format = SCE_GXM_COLOR_BASE_FORMAT_U8U8U8U8;
+        // Shader hints and blend selection must describe the same transient
+        // RGBA8 attachment as the render pass, not a stale guest RG32 surface.
+        context.record.color_surface.colorFormat = SCE_GXM_COLOR_FORMAT_U8U8U8U8_ABGR;
     }
     context.current_color_format = vk_format;
 
@@ -179,7 +182,13 @@ void set_context(VKContext &context, MemState &mem, VKRenderTarget *rt, const Fe
     if (context.state.features.support_shader_interlock)
         // we must always store the depth stencil
         force_store = true;
+#ifdef VITA3K_PLATFORM_IOS
+    // A later texture lookup may split this scene to snapshot color feedback.
+    // Preserve depth/stencil from the first pass, even without guest backing.
+    force_store = true;
+#endif
     context.current_render_pass = context.state.pipeline_cache.retrieve_render_pass(vk_format, force_load, force_store, color_surface_fin == nullptr);
+    context.load_depth_on_resume = force_load;
     if (context.state.features.support_shader_interlock)
         // also retrieve / create the shader interlock pass
         context.current_shader_interlock_pass = context.state.pipeline_cache.retrieve_render_pass(vk_format, true, true, color_surface_fin == nullptr, true);
@@ -261,6 +270,7 @@ void VKContext::start_recording(bool first_in_scene) {
     prerender_cmd.begin(begin_info);
 
     is_recording = true;
+    has_rendered_in_recording = false;
 
     // set all the dynamic state here
     render_cmd.setViewport(0, viewport);
@@ -353,6 +363,8 @@ void VKContext::start_render_pass(bool create_descriptor_set) {
     };
     curr_renderpass_info.setClearValues(curr_clear_values);
     render_cmd.beginRenderPass(curr_renderpass_info, vk::SubpassContents::eInline);
+    has_rendered_in_recording = true;
+    load_depth_on_resume = true;
 
     // set the renderpass info ready in case we need to switch between classic and framebuffer fetch usage
     curr_renderpass_info.setClearValues(nullptr);
@@ -539,6 +551,17 @@ void VKContext::check_for_macroblock_change(bool is_draw) {
         // we changed the current macroblock, restart the renderpass
         last_macroblock_x = curr_macroblock_x;
         last_macroblock_y = curr_macroblock_y;
+
+#ifdef VITA3K_PLATFORM_IOS
+        if (!ignore_macroblock) {
+            // A fresh macroblock must still clear depth unless the guest
+            // requested loading it. Only a restart inside the same block
+            // resumes its previously stored values.
+            const auto &ds = record.depth_stencil_surface;
+            load_depth_on_resume = (ds.depth_data || ds.stencil_data) && ds.force_load;
+            current_render_pass = state.pipeline_cache.retrieve_render_pass(current_color_format, load_depth_on_resume, true, !record.color_surface.data);
+        }
+#endif
 
         if (in_renderpass) {
             if (state.features.use_texture_viewport) {

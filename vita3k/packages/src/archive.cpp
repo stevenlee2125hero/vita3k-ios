@@ -47,6 +47,14 @@ bool read_archive_path(mz_zip_archive &zip, mz_uint index, std::string &name) {
     if (view.find('\0') != std::string_view::npos)
         return false;
     name.assign(view);
+    // ZIPs made by Windows tools sometimes retain backslashes; Unix zip
+    // commonly prefixes every entry with './'. Normalize those spellings
+    // before root discovery and extraction, retaining traversal checks below.
+    std::replace(name.begin(), name.end(), '\\', '/');
+    while (name.starts_with("./"))
+        name.erase(0, 2);
+    if (name.empty() && mz_zip_reader_is_file_a_directory(&zip, index))
+        name = "."; // Optional archive root directory, skipped by inspection.
     return true;
 }
 
@@ -172,7 +180,7 @@ struct ArchiveInstallMapping {
 };
 
 bool detect_legacy_vita_tree_mapping(std::string_view name, ArchiveInstallMapping &mapping) {
-    static constexpr std::array<std::pair<std::string_view, std::string_view>, 7> roots = {{
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 7> roots = { {
         { "app", "ux0/app" },
         { "patch", "ux0/patch" },
         { "addcont", "ux0/addcont" },
@@ -180,7 +188,7 @@ bool detect_legacy_vita_tree_mapping(std::string_view name, ArchiveInstallMappin
         { "repatch", "ux0/rePatch" },
         { "license", "ux0/license" },
         { "lisense", "ux0/license" },
-    }};
+    } };
 
     std::size_t segment_start = 0;
     while (segment_start < name.size()) {
@@ -225,6 +233,7 @@ ArchiveInspection inspect_open_archive(mz_zip_archive &zip) {
     };
     std::vector<SfoEntry> sfo_entries;
     std::set<std::string> roots;
+    std::set<std::string> file_paths;
     for (mz_uint index = 0; index < entry_count; ++index) {
         mz_zip_archive_file_stat stat{};
         if (!mz_zip_reader_file_stat(&zip, index, &stat)) {
@@ -236,6 +245,8 @@ ArchiveInspection inspect_open_archive(mz_zip_archive &zip) {
             ++result.unsafe_path_count;
             continue;
         }
+        if (name == "." && mz_zip_reader_is_file_a_directory(&zip, index))
+            continue;
         if (!safe_archive_path(name)) {
             ++result.unsafe_path_count;
             continue;
@@ -249,6 +260,10 @@ ArchiveInspection inspect_open_archive(mz_zip_archive &zip) {
             continue;
         }
         ++result.file_count;
+        if (!file_paths.insert(name).second) {
+            result.detail = "Archive contains duplicate application file paths.";
+            return result;
+        }
         std::string root;
         if (find_content_root(name, root) && roots.insert(root).second)
             sfo_entries.push_back({ index, std::move(root) });
@@ -357,17 +372,20 @@ ArchiveInstallResult install_archive_transactionally(const std::filesystem::path
     // not an update package. Desktop workflows historically tolerated these
     // layouts, while the strict iOS importer placed them under ux0/patch and
     // then the library quite correctly showed nothing because no ux0/app base
-    // existed. Promote only archives with an explicit MaiDump marker and no
-    // existing base title. Real gp patch archives remain patches.
+    // existed. An already-installed base must not change this classification
+    // on reinstall. Explicit patch/ trees remain update packages.
     for (auto &application : inspection.applications) {
         if (application.category.find("gp") == std::string::npos)
             continue;
         const auto base_path = vfs_root / "ux0/app" / application.title_id;
         const bool base_exists = std::filesystem::exists(base_path);
-        const bool legacy_full_dump =
-            archive_has_relative_file(zip, application.content_root, "mai_moe/load_type.mai")
+        const bool legacy_full_dump = archive_has_relative_file(zip, application.content_root, "mai_moe/load_type.mai")
             || archive_has_relative_file(zip, application.content_root, "mai_moe/mai.suprx");
-        if (!base_exists && legacy_full_dump) {
+        ArchiveInstallMapping layout;
+        const bool explicit_patch_tree = detect_legacy_vita_tree_mapping(
+                                             application.content_root + "eboot.bin", layout)
+            && layout.install_target.starts_with("ux0/patch/");
+        if (legacy_full_dump && !explicit_patch_tree) {
             LOG_WARN("Archive install: treating legacy Mai full dump {} as base application", application.title_id);
             application.install_target = "ux0/app/" + application.title_id;
         } else if (!base_exists) {

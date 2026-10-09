@@ -34,6 +34,7 @@ struct FeatureState {
         return enable_memory_mapping || support_unmapped_surface_sync;
     }
     bool support_scaled_attribute_formats = true; // can we pass integer to the shader and read them as floats? This is not supported on some Android GPUs
+    bool preserve_packed_rg32 = false; ///< Preserve packed RG32 words with matching integer output, framebuffer fetch and masks.
     bool use_texture_viewport = false; ///< Are we using texture viewports in the shader
 
     bool is_programmable_blending_supported() const {

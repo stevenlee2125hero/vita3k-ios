@@ -170,7 +170,7 @@ struct Context {
 
     std::map<int, std::vector<uint8_t>> ubo_data;
 
-    shader::Hints shader_hints;
+    shader::Hints shader_hints{};
 
     virtual ~Context() = default;
 };

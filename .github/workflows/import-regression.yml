@@ -1,0 +1,21 @@
+name: Archive import regression
+on:
+  push:
+    paths:
+      - 'vita3k/packages/**'
+      - 'tools/import-regression/**'
+      - '.github/workflows/import-regression.yml'
+  pull_request:
+    paths:
+      - 'vita3k/packages/**'
+      - 'tools/import-regression/**'
+      - '.github/workflows/import-regression.yml'
+jobs:
+  transactional-import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test production archive installation under sanitizers
+        run: python3 tools/import-regression/check_archive_import.py
+      - name: Test decrypt commit preserves installed data on failure
+        run: python3 tools/import-regression/check_nonpdrm_transaction.py
