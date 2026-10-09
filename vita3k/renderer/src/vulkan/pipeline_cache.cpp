@@ -472,7 +472,7 @@ vk::PipelineShaderStageCreateInfo PipelineCache::retrieve_shader(const SceGxmPro
 #ifdef VITA3K_PLATFORM_IOS
     // Output format and sampled texture formats affect generated SPIR-V.
     // A program-only key can silently reuse a different material variant.
-    std::array<uint32_t, SCE_GXM_MAX_TEXTURE_UNITS + 4> variant_data{};
+    std::array<uint32_t, SCE_GXM_MAX_TEXTURE_UNITS + 5> variant_data{};
     variant_data[0] = is_vertex ? 0 : static_cast<uint32_t>(hints.color_format);
     variant_data[1] = maskupdate ? 1 : 0;
     // Attribute component counts, register indices and formats also affect
@@ -484,6 +484,10 @@ vk::PipelineShaderStageCreateInfo PipelineCache::retrieve_shader(const SceGxmPro
     variant_data[3] = static_cast<uint32_t>(attribute_tag >> 32);
     for (size_t i = 0; i < SCE_GXM_MAX_TEXTURE_UNITS; i++)
         variant_data[i + 4] = static_cast<uint32_t>(is_vertex ? hints.vertex_textures[i] : hints.fragment_textures[i]);
+    // On-demand disk shaders also need the features which change SPIR-V.
+    // The hash-list header alone is insufficient when precompilation is
+    // bypassed or settings change between sessions.
+    variant_data[SCE_GXM_MAX_TEXTURE_UNITS + 4] = state.get_features_mask();
     const uint64_t variant_tag = XXH64(variant_data.data(), sizeof(variant_data), 0);
     for (size_t i = 0; i < sizeof(variant_tag); i++)
         hash[i] ^= static_cast<uint8_t>(variant_tag >> (8 * i));

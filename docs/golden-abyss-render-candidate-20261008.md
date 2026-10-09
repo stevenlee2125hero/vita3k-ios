@@ -192,3 +192,31 @@ performance. No game files, boot, language/font, save or controller code changes
 The candidate must pass all host regression suites and a real arm64 iOS build
 before the user's requested final device comparison. These checks cannot prove
 the remaining character corruption eliminated.
+
+## v17: scoped crop correctness and on-demand cache feature identity
+
+The v14/v15 integer output experiment was rejected for device startup crashes.
+v17 keeps v16 float attachment/output types, normal shader math and fragment-only
+mask updates. It does not restore the integer-output experiment.
+
+Golden Abyss alone disables the texture viewport shortcut. Transforming UVs into
+a subregion of a larger image is not equivalent to sampling a real cropped image:
+repeat/clamp operate at the larger image boundary after the transform, whereas
+the guest expects them at the crop boundary. The existing GPU snapshot/crop path
+now supplies the actual guest extent for this title. This may add copy overhead;
+it is a correction to sampling semantics, not evidence that the purple material
+root cause is eliminated. Previous v15 included this alongside rejected global
+changes and never reached a successful device comparison.
+
+Texture viewport selection is explicitly recomputed on every late_init, including
+false cases, so changing titles/high-accuracy settings cannot retain stale state.
+The iOS on-demand shader variant also contains get_features_mask(), which includes
+viewport, interlock, memory mapping and vertex attribute capabilities. A hash-list
+header alone does not distinguish individual on-demand SPIR-V files after a
+configuration change. Shader/pipeline version advances to 17.
+
+The material test executes the production title-selection block and variant-key
+assembly, covering Golden Abyss -> Undertale, high-accuracy on/off, unsupported
+viewport layouts and feature-key separation. Its CPU boundary examples and
+builder/hash stubs are not Metal rendering tests. Existing alias/feedback,
+compressed decoder, U2F10 and import regressions remain required.

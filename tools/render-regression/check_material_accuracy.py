@@ -11,6 +11,9 @@ p = (root / 'vita3k/renderer/src/vulkan/pipeline_cache.cpp').read_text()
 v = p.index('    std::array<uint32_t, SCE_GXM_MAX_TEXTURE_UNITS +')
 variant = p[v:p.index('\n    for (size_t i = 0; i < sizeof(variant_tag);', v)]
 mask_stage = p[p.index('    maskupdate = maskupdate && !is_vertex;'):p.index('    maskupdate = maskupdate && !is_vertex;') + len('    maskupdate = maskupdate && !is_vertex;')]
+r = (root / 'vita3k/renderer/src/vulkan/renderer.cpp').read_text()
+crop_start = r.index('    features.use_texture_viewport = support_standard_layout && !use_high_accuracy;')
+crop_selection = r[crop_start:r.index('    // parse the mapping method', crop_start)]
 mask_start = s.index('static void generate_update_mask_body(')
 mask_body = s[mask_start:s.index('\nstatic SpirvCode convert_gxp_to_spirv_impl', mask_start)]
 mask_guard_start = s.index('    translation_state.is_maskupdate = maskupdate &&')
@@ -93,6 +96,7 @@ uint64_t XXH64(const void* data,size_t size,uint64_t seed){
  auto bytes=static_cast<const uint8_t*>(data);uint64_t h=14695981039346656037ull^seed;
  for(size_t i=0;i<size;i++)h=(h^bytes[i])*1099511628211ull;return h;
 }
+struct FeatureStateStub {uint32_t mask=0;uint32_t get_features_mask()const{return mask;}} state;
 uint64_t material_variant(const Hints& hints,bool is_vertex,bool maskupdate){
 '''+mask_stage+variant+r'''
  return variant_tag;
@@ -104,7 +108,32 @@ bool mask_enabled(const Program& program,bool maskupdate){TranslationState trans
 '''+mask_guard+r'''
  return translation_state.is_maskupdate;
 }
+struct CropFeatures {bool use_texture_viewport=false;};
+void select_crop(CropFeatures& features,bool support_standard_layout,bool use_high_accuracy,std::string_view game_id){
+'''+crop_selection+r'''
+}
+void check_crop_sessions(){
+ CropFeatures features;
+ select_crop(features,true,false,"PCSD00001");assert(!features.use_texture_viewport);
+ select_crop(features,true,false,"PCSG01112");assert(features.use_texture_viewport);
+ select_crop(features,true,true,"PCSG01112");assert(!features.use_texture_viewport);
+ select_crop(features,true,false,"PCSG01112");assert(features.use_texture_viewport);
+ select_crop(features,false,false,"PCSG01112");assert(!features.use_texture_viewport);
+ // Crop texels [2,3] from an eight-texel target. Wrapping normalized
+ // coordinates before applying the crop differs from wrapping the target
+ // after applying a viewport transform. Verify both repeat and clamp edges.
+ const int image[8]={0,1,2,3,4,5,6,7};
+ auto clamp=[](int n,int lo,int hi){return n<lo?lo:n>hi?hi:n;};
+ for(int i=-3;i<5;++i){
+  int repeat=((i%2)+2)%2;
+  assert(image[2+repeat]==(repeat?3:2));
+  assert(image[2+clamp(i,0,1)]==(i<1?2:3));
+ }
+ assert(image[4]!=image[2]); // u=1 must repeat at the crop, not at target texel 4.
+ assert(image[1]!=image[2]); // negative u must clamp at the crop, not target texel 1.
+}
 int main(){
+ check_crop_sessions();
  check_transient_fallback();
  std::vector<SceGxmVertexAttribute> attrs{{0,0,0,3,0}};
  Hints hints{};hints.attributes=&attrs;
@@ -125,6 +154,8 @@ int main(){
  assert(!mask_enabled({SceGxmProgramType::Vertex},true));
  assert(mask_enabled({SceGxmProgramType::Fragment},true));
  assert(!mask_enabled({SceGxmProgramType::Fragment},false));
+ state.mask=2;assert(material_variant(hints,true,false)!=vertex);
+ state.mask=0;hints.color_format=0;assert(material_variant(hints,true,false)==vertex);
  TranslationState state{};state.hints=&hints;
  hints.color_format=0;spv::Builder float_builder;generate_update_mask_body(float_builder,state);assert(float_builder.output_type==11);
  hints.color_format=SCE_GXM_COLOR_BASE_FORMAT_F32F32;spv::Builder uint_builder;generate_update_mask_body(uint_builder,state);assert(uint_builder.output_type==11);
@@ -139,4 +170,4 @@ with tempfile.TemporaryDirectory() as tmp:
     subprocess.run(['c++', '-std=c++20', '-fsanitize=address,undefined',
                     str(cpp), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True, env=dict(os.environ, ASAN_OPTIONS='detect_leaks=0'))
-print('PASS: restored float mask outputs, stage/attribute variant keys, transient format and async prefix bounds (builder/hash stubs)')
+print('PASS: float mask outputs, feature/stage/attribute variant keys, per-title crop reset, transient format and async prefix bounds (builder/hash stubs)')

@@ -947,7 +947,7 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
 
 void VKState::late_init(const Config &cfg, const std::string_view game_id, MemState &mem) {
 #ifdef VITA3K_PLATFORM_IOS
-    LOG_INFO("iOS compatibility v16: restored float attachments and shader math; fresh cache");
+    LOG_INFO("iOS compatibility v17: float attachments; title-scoped exact material crops; feature-keyed shaders");
 #endif
     this->mem = &mem;
 
@@ -963,12 +963,23 @@ void VKState::late_init(const Config &cfg, const std::string_view game_id, MemSt
     }
 
     // texture viewport is faster but not entirely accurate
-    if (support_standard_layout && !use_high_accuracy) {
+    features.use_texture_viewport = support_standard_layout && !use_high_accuracy;
+    if (features.use_texture_viewport) {
         LOG_INFO("The Vulkan renderer is using texture viewport for better performance");
-        features.use_texture_viewport = true;
     } else if (use_high_accuracy) {
         LOG_INFO("High accuracy enabled: texture viewport disabled");
     }
+
+#ifdef VITA3K_PLATFORM_IOS
+    if (game_id == "PCSD00001") {
+        // A viewport transform selects an atlas region but does not reproduce
+        // clamp/repeat at that region's edges. Golden Abyss uses cropped
+        // render targets as material textures: give the sampler an actual
+        // image with the guest extent instead of wrapping the whole target.
+        features.use_texture_viewport = false;
+        LOG_INFO("Golden Abyss: exact GPU material crops enabled; float output retained");
+    }
+#endif
 
     // parse the mapping method
     auto &config_mapping = cfg.current_config.memory_mapping;
