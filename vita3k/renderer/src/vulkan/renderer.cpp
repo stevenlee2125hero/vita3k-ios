@@ -947,7 +947,7 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
 
 void VKState::late_init(const Config &cfg, const std::string_view game_id, MemState &mem) {
 #ifdef VITA3K_PLATFORM_IOS
-    LOG_INFO("iOS compatibility v20: stable blend attachment lifetime; float attachments; exact Golden Abyss crops; synchronous pipelines");
+    LOG_INFO("iOS compatibility v21: stable blend lifetime; title-scoped packed RG32; exact material crops; synchronous pipelines");
 #endif
     this->mem = &mem;
 
@@ -971,17 +971,24 @@ void VKState::late_init(const Config &cfg, const std::string_view game_id, MemSt
     }
 
 #ifdef VITA3K_PLATFORM_IOS
-    // v18 aborted in Metal render-pipeline descriptor validation on-device.
-    // Keep the experimental integer shader/attachment contract unreachable
-    // until the actual Metal assertion and full descriptor are captured.
+    // v20 fixed the branch-local blend attachment pointer responsible for
+    // malformed v18/v19 descriptors. Reset the packed policy on every launch:
+    // only Golden Abyss reinterprets this material target as raw color/normal
+    // words; Undertale and other games retain their proven float contract.
     features.preserve_packed_rg32 = false;
     if (game_id == "PCSD00001") {
+        features.preserve_packed_rg32 = true;
+        // The storage-image interlock path is floating-point. Packed RG32
+        // uses typed integer outputs and subpass fetch instead, preserving
+        // NaN/subnormal payloads without fixed-function numeric blending.
+        features.support_shader_interlock = false;
+        features.direct_fragcolor = true;
         // A viewport transform selects an atlas region but does not reproduce
         // clamp/repeat at that region's edges. Golden Abyss uses cropped
         // render targets as material textures: give the sampler an actual
         // image with the guest extent instead of wrapping the whole target.
         features.use_texture_viewport = false;
-        LOG_INFO("Golden Abyss: exact GPU material crops enabled; float output retained");
+        LOG_INFO("Golden Abyss: exact GPU material crops and bit-preserving RG32 integer output enabled");
     }
 #endif
 

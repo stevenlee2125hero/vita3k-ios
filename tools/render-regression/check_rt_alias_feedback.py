@@ -15,6 +15,8 @@ a = s.index('    bool can_use_viewport =')
 viewport = s[a:s.index('    if (can_use_viewport)', a)]
 a = s.index('            const vk::DeviceSize destination_offset =')
 offset = s[a:s.index(';', a) + 1]
+a = s.index('        const bool host_copy_compatible =')
+copy_policy = s[a:s.index('            trace_color_lookup', a)]
 ctx_source = (root / 'vita3k/renderer/src/vulkan/context.cpp').read_text()
 a = ctx_source.index('        if (!ignore_macroblock) {\n            // A fresh macroblock')
 macroblock = ctx_source[a:ctx_source.index('\n#endif', a)]
@@ -59,6 +61,12 @@ bool alias(Info info,State state,unsigned data_delta,vk::Format vk_format,
 '''+predicate+r'''
  return byte_equivalent_linear_alias;
 }
+bool direct_copy(Info info,vk::Format vk_format,unsigned bytes_per_pixel_requested,unsigned bytes_per_pixel_in_store){
+'''+copy_policy+r'''
+ return true;
+ }
+ return false;
+}
 int main(){
  Info info;State state;
  for(bool load:{false,true})for(bool backing:{false,true}) {
@@ -82,6 +90,12 @@ int main(){
  Info raw;raw.texture.format=vk::Format::eR32G32Uint;
  assert(alias(raw,state,0,vk::Format::eR8G8B8A8Unorm));
  assert(alias(raw,state,4,vk::Format::eR8G8B8A8Snorm));
+ // Integer and floating RG32 have equal footprints but must use the raw
+ // staging route; a same-format copy may use the image route.
+ assert(direct_copy(raw,vk::Format::eR32G32Uint,8,8));
+ assert(!direct_copy(raw,vk::Format::eR32G32Sfloat,8,8));
+ assert(!direct_copy(raw,vk::Format::eR8G8B8A8Unorm,4,8));
+ assert(!direct_copy(raw,vk::Format::eR8G8B8A8Snorm,4,8));
  // Emulate the Vulkan buffer copies with byte-distinct rows, preserving raw
  // float bits (no numeric conversion), row crossing and the last +4 tail.
  for(unsigned h:{1u,2u,408u})for(unsigned start_x:{0u,1u}) {
@@ -98,6 +112,19 @@ int main(){
   unsigned base_format=info.format;
 '''+viewport+r'''
   assert(can_use_viewport==!is_same_image);
+ }
+ // Packed colors/normals can look like NaNs, infinities or subnormals when
+ // viewed as float. Integer -> buffer -> RGBA8 must preserve every bit,
+ // including the +4-byte normal-word alias and its zero-filled final tail.
+ const uint32_t payloads[]={0x7fc12345u,0x7f812345u,0xffcabcdeu,0x7f800000u,
+  0xff800000u,0x00000001u,0x007fffffu,0x80000000u,0xdeadbeefu,0xffffffffu};
+ std::vector<uint8_t> bytes;
+ for(auto word:payloads)for(unsigned shift:{0u,8u,16u,24u})bytes.push_back(uint8_t(word>>shift));
+ auto staging=bytes;staging.resize(bytes.size()+4,0);
+ for(unsigned shift:{0u,4u}) {
+  std::vector<uint8_t> rgba(bytes.size());
+  std::copy_n(staging.begin()+shift,rgba.size(),rgba.begin());
+  for(unsigned i=0;i<rgba.size();i++)assert(rgba[i]==(i+shift<bytes.size()?bytes[i+shift]:0));
  }
  // A macroblock may already have ended the pass, but its writes are still in
  // render_cmd. Both open and closed passes must precede the new snapshot.

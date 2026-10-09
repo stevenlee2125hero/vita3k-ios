@@ -168,16 +168,19 @@ void check_real_title_dispatch(){
 '''+dispatch+r'''
   assert(renderer.received==title);
   CropFeatures features;select_crop(features,true,false,renderer.received);
-  assert(!features.preserve_packed_rg32); // rejected v18 Metal path stays disabled for every title
+  assert(features.preserve_packed_rg32==(title==std::string("PCSD00001")));
  }
 }
 void check_crop_sessions(){
  CropFeatures features;
- select_crop(features,true,false,"PCSD00001");assert(!features.use_texture_viewport && !features.preserve_packed_rg32);
+ select_crop(features,true,false,"PCSD00001");assert(!features.use_texture_viewport && features.preserve_packed_rg32);
+ assert(!features.support_shader_interlock && features.direct_fragcolor);
  select_crop(features,true,false,"PCSG01112");assert(features.use_texture_viewport && !features.preserve_packed_rg32);
  select_crop(features,true,true,"PCSG01112");assert(!features.use_texture_viewport);
  select_crop(features,true,false,"PCSG01112");assert(features.use_texture_viewport);
  select_crop(features,false,false,"PCSG01112");assert(!features.use_texture_viewport);
+ select_crop(features,true,true,"PCSD00001");assert(features.preserve_packed_rg32 && !features.use_texture_viewport);
+ select_crop(features,true,false,"OTHER_TITLE");assert(!features.preserve_packed_rg32);
  // Crop texels [2,3] from an eight-texel target. Wrapping normalized
  // coordinates before applying the crop differs from wrapping the target
  // after applying a viewport transform. Verify both repeat and clamp edges.
