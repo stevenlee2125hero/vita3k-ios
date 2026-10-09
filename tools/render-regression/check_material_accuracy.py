@@ -43,8 +43,11 @@ output_start = s.index('        const bool packed_rg32 = translate_state.is_vulk
 output = s[output_start:s.index('        if (features.preserve_f16_nan_as_u16)', output_start)]
 fetch_start = s.index('            const bool packed_rg32 = translation_state.is_vulkan')
 fetch = s[fetch_start:s.index('            translation_state.last_frag_data_id', fetch_start)]
-blend_start = p.index('        vk::PipelineColorBlendAttachmentState blending = fragment_program.blending;')
-blend = p[blend_start:p.index('        color_blending.setAttachments(blending);', blend_start)]
+blend_declaration = '    vk::PipelineColorBlendAttachmentState blending = fragment_program.blending;'
+assert blend_declaration in p
+blend_start = p.index('        if (state.features.preserve_packed_rg32 && record.color_base_format')
+blend_end = p.index('\n        }', blend_start) + len('\n        }')
+blend = blend_declaration + '\n' + p[blend_start:blend_end]
 code = r'''
 #include <vector>
 #include <cstdint>

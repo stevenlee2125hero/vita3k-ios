@@ -919,24 +919,27 @@ vk::Pipeline PipelineCache::compile_pipeline(SceGxmPrimitiveType type, vk::Rende
     if (support_coherent_framebuffer_fetch && gxm_fragment_shader->is_frag_color_used())
         color_blending.flags = vk::PipelineColorBlendStateCreateFlagBits::eRasterizationOrderAttachmentAccessEXT;
 
+    // Vulkan-Hpp setAttachments stores a pointer, not a copy. Keep this
+    // attachment alive until createGraphicsPipeline consumes pipeline_info.
+    // A branch-local copy leaves a dangling pointer and corrupts blend state
+    // and write masks when subsequent pipeline structures reuse its stack.
+    vk::PipelineColorBlendAttachmentState blending = fragment_program.blending;
     const bool frag_has_no_output = static_cast<bool>(gxm_fragment_shader->program_flags & SCE_GXM_PROGRAM_FLAG_OUTPUT_UNDEFINED);
     if (is_fragment_disabled || frag_has_no_output || use_shader_interlock) {
         // The write mask must be empty as the lack of a fragment shader results in undefined values
-        static const vk::PipelineColorBlendAttachmentState blending = {
+        blending = {
             .blendEnable = VK_FALSE,
             .colorWriteMask = vk::ColorComponentFlags()
         };
-        color_blending.setAttachments(blending);
     } else {
-        vk::PipelineColorBlendAttachmentState blending = fragment_program.blending;
         if (state.features.preserve_packed_rg32 && record.color_base_format == SCE_GXM_COLOR_BASE_FORMAT_F32F32) {
             // Integer render attachments cannot use fixed-function floating
             // blending. Packed material words are already composed by USSE;
             // programmable framebuffer fetch retains their exact bits.
             blending.blendEnable = VK_FALSE;
         }
-        color_blending.setAttachments(blending);
     }
+    color_blending.setAttachments(blending);
 
     vk::PipelineLayout pipeline_layout = pipeline_layouts[vertex_program.texture_count][fragment_program.texture_count];
 

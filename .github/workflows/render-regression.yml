@@ -49,3 +49,7 @@ jobs:
         run: python3 tools/render-regression/check_uniform_shuffle.py
       - name: Test iOS synchronous startup and worker teardown policy
         run: python3 tools/render-regression/check_ios_pipeline_stability.py
+      - name: Install Vulkan headers for actual descriptor lifetime checks
+        run: sudo apt-get update && sudo apt-get install -y libvulkan-dev
+      - name: Test production pipeline attachment lifetime with real Vulkan-Hpp
+        run: python3 tools/render-regression/check_pipeline_attachment_lifetime.py

@@ -947,7 +947,7 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
 
 void VKState::late_init(const Config &cfg, const std::string_view game_id, MemState &mem) {
 #ifdef VITA3K_PLATFORM_IOS
-    LOG_INFO("iOS compatibility v19: float attachments; exact Golden Abyss crops; synchronous pipelines");
+    LOG_INFO("iOS compatibility v20: stable blend attachment lifetime; float attachments; exact Golden Abyss crops; synchronous pipelines");
 #endif
     this->mem = &mem;
 

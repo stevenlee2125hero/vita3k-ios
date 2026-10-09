@@ -41,8 +41,29 @@ teardown. Crop/title regression must prove the rejected integer path remains
 disabled for Golden -> Undertale -> Golden launches.
 
 First-use compilation can pause rendering longer with this synchronous
-policy. No current Undertale runtime log was supplied with this feedback;
-the black screenshot cannot distinguish pipeline compilation, trophy/HLE
-waits, loader failure, JIT failure or presentation failure. Obtain the v18
-`tsubomi.log` before declaring its root cause or the regression fixed.
+policy. The subsequently supplied `tsubomi(4).log` identifies Undertale
+PCSG01112 on the rejected v18 binary. JIT allocation succeeds, the synthetic
+trophy context initializes, audio files open and guest framebuffers advance.
+At 13:04:14.939 the run ends with `vk::Queue::submit: ErrorDeviceLost` and
+SIGABRT. Pipeline compilation uses four workers and the watchdog reports
+zero completed pipelines. This narrows the failure to the GPU/render path;
+it does not establish whether worker concurrency, a shader or another GPU
+resource caused device loss. This log is not the Golden Abyss crash session.
+
+The new Golden Abyss shader dump contains one vertex and one fragment
+program. Fragment `4cd547a78d48677d0e5773bfac1ecd44a0d1c3ef7f73ded396f068ea68d21f2a`
+has variant tag `FF00F85435F659E4`. Recomputing the production XXH64 variant
+key matches F32F32_GR, normal output (not mask), feature mask 56 and sixteen
+default U8U8U8U8_ABGR texture hints. Feature bit 5 therefore enables the
+rejected integer path in this actual dump. Host translation of this fragment
+produces `uint4 [[color(0)]]` with that path enabled and `float4 [[color(0)]]`
+when disabled. All four normal/mask, integer/float SPIR-V variants validate.
+This supports disabling the integer path but still does not identify the
+Metal assertion's exact descriptor condition without its assertion text.
+
+The v19 full upstream-core iOS build and all renderer, importer, format and
+fixture CI checks succeeded. The downloaded IPA was checked for archive CRC,
+SHA-256, arm64 device executable, source/version markers and all 22 bundled
+shaders. Executable UUID is `09c2c640-e380-398a-830b-d342be6193da`.
+These are build and host checks, not an A16 gameplay test.
 Golden Abyss purple material corruption remains unresolved on-device.
