@@ -77,4 +77,3 @@ Read-only game metadata inspection found the separate VPK is category `gp`
 (APP_VER 01.03), while the NoNpDrm directory has `app` category `gd` 01.00 and
 `patch` category `gp` 01.03. Do not infer an independently installable base game
 from the VPK filename. No game content was changed or uploaded.
-
