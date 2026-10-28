@@ -55,5 +55,7 @@ jobs:
         run: python3 tools/render-regression/check_pipeline_attachment_lifetime.py
       - name: Install real shader validation dependencies
         run: sudo apt-get update && sudo apt-get install -y glslang-dev libfmt-dev spirv-tools spirv-cross spirv-headers
+      - name: Check out pinned SPIR-V builder source
+        run: git submodule update --init --depth 1 external/glslang
       - name: Validate production packed register helpers with real SPIR-V and MSL
         run: python3 tools/render-regression/check_raw_material_registers.py

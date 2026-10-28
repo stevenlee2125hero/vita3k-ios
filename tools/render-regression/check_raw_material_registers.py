@@ -4,11 +4,10 @@
 No game assets or model builder. The production utility implementation generates
 both raw and legacy register variants, including byte/half masked stores. This
 checks SPIR-V typing and MSL compilation; device rendering remains a separate gate.
-Requires glslang-dev, libfmt-dev, spirv-tools and spirv-cross on Linux.
+Requires the pinned external/glslang submodule, libfmt-dev, spirv-tools
+and spirv-cross on Linux.
 """
 from pathlib import Path
-import os
-import shlex
 import subprocess
 import tempfile
 
@@ -114,13 +113,29 @@ with tempfile.TemporaryDirectory() as tmp:
 ''')
     cpp = tmp / 'test.cpp'
     cpp.write_text(harness.replace('PRODUCTION_SOURCE', source))
-    libs = shlex.split(subprocess.check_output(['pkg-config', '--libs', 'glslang'], text=True))
-    subprocess.run(['c++', '-std=c++20', '-O0', '-g', '-I'+str(tmp),
-                    '-I/usr/include/glslang', '-I'+str(root/'vita3k/shader/include'),
-                    '-I'+str(root/'vita3k/features/include'), '-I'+str(root/'vita3k/util/include'),
-                    str(cpp), '-o', str(tmp/'test'), '-lSPIRV', *libs,
-                    '-lSPIRV-Tools-opt', '-lSPIRV-Tools', '-lfmt', '-lpthread'], check=True)
-    subprocess.run([str(tmp/'test'), str(tmp)], check=True)
+    cmake = f"""cmake_minimum_required(VERSION 3.20)
+project(raw_material_registers LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(ENABLE_OPT OFF CACHE BOOL "" FORCE)
+set(ENABLE_GLSLANG_BINARIES OFF CACHE BOOL "" FORCE)
+set(BUILD_EXTERNAL OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+find_package(Threads REQUIRED)
+find_package(fmt REQUIRED)
+add_subdirectory("{(root/'external/glslang').as_posix()}" glslang)
+add_executable(register_test test.cpp)
+target_include_directories(register_test PRIVATE "{tmp.as_posix()}"
+ "{(root/'external/glslang').as_posix()}"
+ "{(root/'vita3k/shader/include').as_posix()}"
+ "{(root/'vita3k/features/include').as_posix()}"
+ "{(root/'vita3k/util/include').as_posix()}")
+target_link_libraries(register_test PRIVATE SPIRV glslang fmt::fmt Threads::Threads)
+"""
+    (tmp / 'CMakeLists.txt').write_text(cmake)
+    subprocess.run(['cmake', '-S', str(tmp), '-B', str(tmp/'build'),
+                    '-DCMAKE_BUILD_TYPE=Debug'], check=True)
+    subprocess.run(['cmake', '--build', str(tmp/'build'), '--target', 'register_test', '-j', '4'], check=True)
+    subprocess.run([str(tmp/'build/register_test'), str(tmp)], check=True)
     for binary in sorted(tmp.glob('*.spv')):
         subprocess.run(['spirv-val', '--target-env', 'vulkan1.0', str(binary)], check=True)
         subprocess.run(['spirv-cross', str(binary), '--msl', '--msl-version', '20300',
