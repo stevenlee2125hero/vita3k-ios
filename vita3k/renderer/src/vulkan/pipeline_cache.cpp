@@ -255,6 +255,16 @@ void PipelineCache::init(bool support_rasterized_order_access) {
 }
 
 void PipelineCache::set_async_compilation(bool enable) {
+#ifdef VITA3K_PLATFORM_IOS
+    // Worker publication of shader modules and pipelines is not synchronized
+    // with every render-thread read. Also, deferred draws are skipped and may
+    // never be replayed by games which draw their startup screen only once.
+    // Use the synchronous path on iOS until those contracts are fixed. Apply
+    // this here so both initial config and in-game settings obey the policy.
+    if (enable)
+        LOG_INFO_ONCE("iOS: synchronous pipeline compilation enabled; startup draws are retained");
+    enable = false;
+#endif
     if (enable == use_async_compilation)
         return;
 
@@ -464,7 +474,34 @@ static const vk::SpecializationInfo srgb_info_false = {
     .pData = &srgb_entry_false
 };
 
-vk::PipelineShaderStageCreateInfo PipelineCache::retrieve_shader(const SceGxmProgram *program, const Sha256Hash &hash, bool is_vertex, bool maskupdate, MemState &mem, const shader::Hints &hints, bool is_srgb) {
+vk::PipelineShaderStageCreateInfo PipelineCache::retrieve_shader(const SceGxmProgram *program, const Sha256Hash &program_hash, bool is_vertex, bool maskupdate, MemState &mem, const shader::Hints &hints, bool is_srgb) {
+    // A mask update replaces only the fragment body. The vertex program
+    // must still produce position and varyings for Metal rasterization.
+    maskupdate = maskupdate && !is_vertex;
+    Sha256Hash hash = program_hash;
+#ifdef VITA3K_PLATFORM_IOS
+    // Output format and sampled texture formats affect generated SPIR-V.
+    // A program-only key can silently reuse a different material variant.
+    std::array<uint32_t, SCE_GXM_MAX_TEXTURE_UNITS + 5> variant_data{};
+    variant_data[0] = is_vertex ? 0 : static_cast<uint32_t>(hints.color_format);
+    variant_data[1] = maskupdate ? 1 : 0;
+    // Attribute component counts, register indices and formats also affect
+    // vertex SPIR-V (including stripped-symbol inputs and implicit alpha).
+    const uint64_t attribute_tag = is_vertex && hints.attributes
+        ? XXH64(hints.attributes->data(), hints.attributes->size() * sizeof(SceGxmVertexAttribute), 0)
+        : 0;
+    variant_data[2] = static_cast<uint32_t>(attribute_tag);
+    variant_data[3] = static_cast<uint32_t>(attribute_tag >> 32);
+    for (size_t i = 0; i < SCE_GXM_MAX_TEXTURE_UNITS; i++)
+        variant_data[i + 4] = static_cast<uint32_t>(is_vertex ? hints.vertex_textures[i] : hints.fragment_textures[i]);
+    // On-demand disk shaders also need the features which change SPIR-V.
+    // The hash-list header alone is insufficient when precompilation is
+    // bypassed or settings change between sessions.
+    variant_data[SCE_GXM_MAX_TEXTURE_UNITS + 4] = state.get_features_mask();
+    const uint64_t variant_tag = XXH64(variant_data.data(), sizeof(variant_data), 0);
+    for (size_t i = 0; i < sizeof(variant_tag); i++)
+        hash[i] ^= static_cast<uint8_t>(variant_tag >> (8 * i));
+#endif
     if (maskupdate)
         LOG_WARN_ONCE("Mask not implemented in the vulkan renderer!");
 
@@ -497,7 +534,9 @@ vk::PipelineShaderStageCreateInfo PipelineCache::retrieve_shader(const SceGxmPro
     }
 
     if (*shader_module == shader_compiling) {
+#ifndef VITA3K_PLATFORM_IOS
         precompile_shader(hash, false);
+#endif
     }
 
     if (*shader_module != shader_compiling) {
@@ -513,7 +552,10 @@ vk::PipelineShaderStageCreateInfo PipelineCache::retrieve_shader(const SceGxmPro
     const std::string hash_text = hex_string(hash);
 
     LOG_INFO("Generating vulkan spv shader {}", hash_text);
-    const std::string shader_version = fmt::format("vk{}", shader::CURRENT_VERSION);
+    std::string shader_version = fmt::format("vk{}", shader::CURRENT_VERSION);
+#ifdef VITA3K_PLATFORM_IOS
+    shader_version += fmt::format("-variant{:016X}", variant_tag);
+#endif
 
     shader::usse::SpirvCode source = load_spirv_shader(*program, state.features, true, hints, maskupdate, state.shaders_path, state.shaders_log_path, shader_version, true);
 
@@ -877,18 +919,27 @@ vk::Pipeline PipelineCache::compile_pipeline(SceGxmPrimitiveType type, vk::Rende
     if (support_coherent_framebuffer_fetch && gxm_fragment_shader->is_frag_color_used())
         color_blending.flags = vk::PipelineColorBlendStateCreateFlagBits::eRasterizationOrderAttachmentAccessEXT;
 
+    // Vulkan-Hpp setAttachments stores a pointer, not a copy. Keep this
+    // attachment alive until createGraphicsPipeline consumes pipeline_info.
+    // A branch-local copy leaves a dangling pointer and corrupts blend state
+    // and write masks when subsequent pipeline structures reuse its stack.
+    vk::PipelineColorBlendAttachmentState blending = fragment_program.blending;
     const bool frag_has_no_output = static_cast<bool>(gxm_fragment_shader->program_flags & SCE_GXM_PROGRAM_FLAG_OUTPUT_UNDEFINED);
     if (is_fragment_disabled || frag_has_no_output || use_shader_interlock) {
         // The write mask must be empty as the lack of a fragment shader results in undefined values
-        static const vk::PipelineColorBlendAttachmentState blending = {
+        blending = {
             .blendEnable = VK_FALSE,
             .colorWriteMask = vk::ColorComponentFlags()
         };
-        color_blending.setAttachments(blending);
     } else {
-        const vk::PipelineColorBlendAttachmentState &blending = fragment_program.blending;
-        color_blending.setAttachments(blending);
+        if (state.features.preserve_packed_rg32 && record.color_base_format == SCE_GXM_COLOR_BASE_FORMAT_F32F32) {
+            // Integer render attachments cannot use fixed-function floating
+            // blending. Packed material words are already composed by USSE;
+            // programmable framebuffer fetch retains their exact bits.
+            blending.blendEnable = VK_FALSE;
+        }
     }
+    color_blending.setAttachments(blending);
 
     vk::PipelineLayout pipeline_layout = pipeline_layouts[vertex_program.texture_count][fragment_program.texture_count];
 
@@ -930,6 +981,20 @@ vk::Pipeline PipelineCache::compile_pipeline(SceGxmPrimitiveType type, vk::Rende
         .subpass = 0
     };
 
+#ifdef VITA3K_PLATFORM_IOS
+    // Metal descriptor assertions abort before Vulkan can return an error.
+    // Flush the exact guest/output contract before entering that call so a
+    // device log identifies the failing shader pair instead of only SIGABRT.
+    LOG_INFO("iOS pipeline: vertex={} fragment={} color=0x{:X} hint=0x{:X} mask={} stages={} blend={} write_mask=0x{:X} packed={}",
+        hex_string(vertex_program.hash), hex_string(fragment_program.hash),
+        static_cast<uint32_t>(record.color_base_format),
+        static_cast<uint32_t>(hints.color_format), fragment_program_gxm.is_maskupdate,
+        shader_stage_count, color_blending.pAttachments->blendEnable,
+        static_cast<uint32_t>(color_blending.pAttachments->colorWriteMask),
+        state.features.preserve_packed_rg32);
+    if (auto logger = spdlog::default_logger())
+        logger->flush();
+#endif
     const auto result = state.device.createGraphicsPipeline(pipeline_cache, pipeline_info);
     if (result.result != vk::Result::eSuccess) {
         LOG_CRITICAL("Failed to create pipeline.");
@@ -943,6 +1008,10 @@ vk::Pipeline PipelineCache::retrieve_pipeline(VKContext &context, SceGxmPrimitiv
     const GxmRecordState &record = context.record;
     // get the hash of the current context
     uint64_t key = XXH3_64bits(&record, record_pipeline_len);
+#ifdef VITA3K_PLATFORM_IOS
+    key ^= XXH64(context.shader_hints.vertex_textures, sizeof(context.shader_hints.vertex_textures), 0);
+    key ^= XXH64(context.shader_hints.fragment_textures, sizeof(context.shader_hints.fragment_textures), 1);
+#endif
 
     // add the hash of the blending
     SceGxmFragmentProgram &fragment_program_gxm = *record.fragment_program.get(mem);

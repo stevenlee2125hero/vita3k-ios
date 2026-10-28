@@ -21,6 +21,8 @@
 
 #include <vulkan/vulkan_format_traits.hpp>
 
+#include <numeric>
+
 #include <gxm/functions.h>
 #include <gxm/types.h>
 #include <renderer/functions.h>
@@ -99,12 +101,14 @@ void sync_texture(VKContext &context, MemState &mem, std::size_t index, SceGxmTe
         return;
     }
 
-    if (index >= SCE_GXM_MAX_TEXTURE_UNITS) {
-        // Vertex textures
-        context.shader_hints.vertex_textures[index - SCE_GXM_MAX_TEXTURE_UNITS] = format;
-    } else {
-        context.shader_hints.fragment_textures[index] = format;
-    }
+    SceGxmTextureFormat &format_hint = is_vertex
+        ? context.shader_hints.vertex_textures[index - SCE_GXM_MAX_TEXTURE_UNITS]
+        : context.shader_hints.fragment_textures[index];
+#ifdef VITA3K_PLATFORM_IOS
+    if (format_hint != format)
+        context.refresh_pipeline = true;
+#endif
+    format_hint = format;
 
     std::optional<TextureLookupResult> lookup_result = std::nullopt;
 
@@ -394,6 +398,8 @@ void VKTextureCache::configure_texture(const SceGxmTexture &gxm_texture) {
         // using mips, the overall memory needed will be 4/3 of the base memory
         // round up to 3/2
         memory_needed += memory_needed / 2;
+    // Reserve per-region padding as well as pixel data, including tail mips.
+    memory_needed += mip_count * std::lcm<uint32_t>(4, vk::blockSize(vk_format));
     if (is_cube)
         memory_needed *= 6;
     current_texture->memory_needed = align(memory_needed, 16);
@@ -512,6 +518,11 @@ void VKTextureCache::upload_texture_impl(SceGxmTextureBaseFormat base_format, ui
         size_t bytes_per_pixel = (bpp + 7) >> 3;
         upload_size = pixels_per_stride * height * bytes_per_pixel;
     }
+
+    // Each mip/face is a separate copy region. BC4 and R8/RG8 tail mips
+    // can leave an unaligned offset for the following upload.
+    const vk::DeviceSize copy_alignment = std::lcm<vk::DeviceSize>(4, vk::blockSize(image.format));
+    staging_buffer.used_so_far = (staging_buffer.used_so_far + copy_alignment - 1) / copy_alignment * copy_alignment;
 
     if (staging_buffer.used_so_far + upload_size > staging_buffer.buffer.size) {
         LOG_ERROR("Staging buffer size left ({}) is too small for texture size {}!", staging_buffer.buffer.size - staging_buffer.used_so_far, upload_size);

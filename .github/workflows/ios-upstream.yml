@@ -34,7 +34,9 @@ concurrency:
 jobs:
   unsigned-ipa:
     name: Upstream core arm64 device link
-    runs-on: macos-15
+    # Use Intel hosts to avoid the macOS arm64 runner capacity queue.
+    # Xcode still cross-compiles the application and dependencies for iPhone arm64.
+    runs-on: macos-15-intel
     timeout-minutes: 180
 
     steps:

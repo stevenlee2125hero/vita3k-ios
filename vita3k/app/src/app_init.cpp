@@ -572,7 +572,10 @@ void reset_app_state(EmuEnvState &state) {
 bool late_init(EmuEnvState &state) {
     // note: mem is not initialized yet but that's not an issue
     // the renderer is not using it yet, just storing it for later uses
-    state.renderer->late_init(state.cfg, state.app_path, state.mem);
+    // setup_game_launch resolves the selected library entry into io.title_id.
+    // EmuEnvState::app_path is legacy state and is cleared during teardown;
+    // using it silently disables title-specific renderer settings on relaunch.
+    state.renderer->late_init(state.cfg, state.io.title_id, state.mem);
 
     const bool need_page_table = state.renderer->mapping_method == MappingMethod::PageTable || state.renderer->mapping_method == MappingMethod::NativeBuffer;
     if (!init(state.mem, need_page_table)) {
@@ -597,6 +600,15 @@ void apply_renderer_config(EmuEnvState &emuenv) {
     const auto &cc = emuenv.cfg.current_config;
 
     r.res_multiplier = cc.resolution_multiplier;
+#ifdef VITA3K_PLATFORM_IOS
+    if (emuenv.io.title_id == "PCSD00001" && r.current_backend == renderer::Backend::Vulkan) {
+        // The material buffer aliases two RGBA8 texels to each RG32 word pair.
+        // Its byte-exact copy path requires native resolution; scaling the
+        // images independently changes that layout and samples stale guest RAM.
+        r.res_multiplier = 1.0f;
+        LOG_INFO_ONCE("Golden Abyss: native resolution required for packed material aliases (requested {}x)", cc.resolution_multiplier);
+    }
+#endif
     r.set_vsync_state(cc.v_sync);
     r.set_surface_sync_state(cc.disable_surface_sync);
     r.set_screen_filter(cc.screen_filter);

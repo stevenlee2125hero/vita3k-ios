@@ -40,7 +40,7 @@ vk::CompareOp translate_stencil_func(SceGxmStencilFunc stencil_func);
 vk::StencilOp translate_stencil_op(SceGxmStencilOp stencil_op);
 
 namespace color {
-vk::Format translate_format(SceGxmColorBaseFormat base_format);
+vk::Format translate_format(SceGxmColorBaseFormat base_format, bool preserve_packed_rg32 = false);
 vk::ComponentMapping translate_swizzle(SceGxmColorFormat format);
 } // namespace color
 

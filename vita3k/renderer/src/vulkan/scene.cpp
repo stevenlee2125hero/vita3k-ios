@@ -335,7 +335,11 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
 
     // when we do multiple render pass for one scene (shader interlock or slow macroblock),
     // we need to always load the depth-stencil after the first draw
-    if (context.is_first_scene_draw && (context.state.features.support_shader_interlock || context.ignore_macroblock)) {
+    bool preserve_depth_between_passes = context.state.features.support_shader_interlock || context.ignore_macroblock;
+#ifdef VITA3K_PLATFORM_IOS
+    preserve_depth_between_passes = true;
+#endif
+    if (context.is_first_scene_draw && preserve_depth_between_passes) {
         // update the render pass to load and store the depth and stencil
         context.current_render_pass = context.state.pipeline_cache.retrieve_render_pass(context.current_color_format, true, true, !context.record.color_surface.data);
         context.is_first_scene_draw = false;

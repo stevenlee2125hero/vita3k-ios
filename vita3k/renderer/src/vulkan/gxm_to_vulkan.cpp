@@ -410,7 +410,7 @@ vk::ComponentMapping translate_swizzle(SceGxmColorFormat format) {
     }
 }
 
-vk::Format translate_format(SceGxmColorBaseFormat format) {
+vk::Format translate_format(SceGxmColorBaseFormat format, bool preserve_packed_rg32) {
     // TODO: look if all these formats are available on the GPU
     switch (format) {
     // classic unpacked formats
@@ -438,7 +438,7 @@ vk::Format translate_format(SceGxmColorBaseFormat format) {
     case SCE_GXM_COLOR_BASE_FORMAT_F16F16:
         return vk::Format::eR16G16Sfloat;
     case SCE_GXM_COLOR_BASE_FORMAT_F32F32:
-        return vk::Format::eR32G32Sfloat;
+        return preserve_packed_rg32 ? vk::Format::eR32G32Uint : vk::Format::eR32G32Sfloat;
 
     case SCE_GXM_COLOR_BASE_FORMAT_U8U8U8U8:
         return vk::Format::eR8G8B8A8Unorm;

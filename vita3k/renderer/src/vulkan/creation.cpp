@@ -182,7 +182,13 @@ VKRenderTarget::VKRenderTarget(VKState &state, const SceGxmRenderTargetParams &p
         depthstencil.height *= 2;
     }
 
-    depthstencil.init_image(vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eTransientAttachment);
+    vk::ImageUsageFlags depth_usage = vk::ImageUsageFlagBits::eDepthStencilAttachment;
+#ifndef VITA3K_PLATFORM_IOS
+    depth_usage |= vk::ImageUsageFlagBits::eTransientAttachment;
+#endif
+    // iOS feedback snapshots can resume this scene with LOAD. A memoryless
+    // depth attachment cannot preserve values across those render passes.
+    depthstencil.init_image(depth_usage);
 
     // transition images to their right state
     vk::CommandBuffer cmd_buffer = vkutil::create_single_time_command(state.device, state.general_command_pool);
