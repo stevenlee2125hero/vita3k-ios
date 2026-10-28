@@ -35,6 +35,8 @@ color = fmt[fmt.index('namespace color {'):fmt.index('namespace texture {')]
 assert 'preserve_packed_rg32 ? vk::Format::eR32G32Uint : vk::Format::eR32G32Sfloat' in color
 assert 'features.preserve_packed_rg32' in c
 app_init = (root / 'vita3k/app/src/app_init.cpp').read_text()
+native_start = app_init.index('    if (emuenv.io.title_id == "PCSD00001" && r.current_backend')
+native_resolution = app_init[native_start:app_init.index('\n#endif', native_start)]
 dispatch = next(line for line in app_init.splitlines() if 'state.renderer->late_init(' in line)
 apps = (root / 'vita3k/app/src/apps_list.cpp').read_text()
 identity_start = apps.index('    emuenv.io.app_path = it->path;')
@@ -134,6 +136,18 @@ struct CropFeatures {bool use_texture_viewport=false,preserve_packed_rg32=false,
 void select_crop(CropFeatures& features,bool support_standard_layout,bool use_high_accuracy,std::string_view game_id){
 '''+crop_selection+r'''
 }
+namespace renderer {enum class Backend {Vulkan,OpenGL};}
+#define LOG_INFO_ONCE(...) ((void)0)
+void check_native_resolution(){
+ for(auto backend:{renderer::Backend::Vulkan,renderer::Backend::OpenGL})
+  for(auto title:{"PCSD00001","PCSE01116",""})for(float scale:{1.f,2.f,4.f}){
+   struct {float res_multiplier;renderer::Backend current_backend;} r{scale,backend};
+   struct {struct {std::string title_id;} io;} emuenv;emuenv.io.title_id=title;
+   struct {float resolution_multiplier;} cc{scale};
+''' + native_resolution + r'''
+   assert(r.res_multiplier==((backend==renderer::Backend::Vulkan&&emuenv.io.title_id=="PCSD00001")?1.f:scale));
+  }
+}
 struct Entry {std::string path,title_id,addcont,content_id,savedata,title,app_ver,category,stitle;};
 struct RendererStub {std::string received;void late_init(int,std::string_view title,int){received=title;}};
 struct Env {std::string app_path,current_app_title;
@@ -195,7 +209,7 @@ void check_crop_sessions(){
  assert(image[4]!=image[2]); // u=1 must repeat at the crop, not at target texel 4.
  assert(image[1]!=image[2]); // negative u must clamp at the crop, not target texel 1.
 }
-int main(){
+int main(){check_native_resolution();
  for(bool enabled:{false,true})for(bool vulkan:{false,true})
   for(auto format:{0u,SCE_GXM_COLOR_BASE_FORMAT_F32F32})check_material_pipeline(enabled,vulkan,format);
  check_real_title_dispatch();

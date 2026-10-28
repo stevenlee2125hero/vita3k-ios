@@ -600,6 +600,15 @@ void apply_renderer_config(EmuEnvState &emuenv) {
     const auto &cc = emuenv.cfg.current_config;
 
     r.res_multiplier = cc.resolution_multiplier;
+#ifdef VITA3K_PLATFORM_IOS
+    if (emuenv.io.title_id == "PCSD00001" && r.current_backend == renderer::Backend::Vulkan) {
+        // The material buffer aliases two RGBA8 texels to each RG32 word pair.
+        // Its byte-exact copy path requires native resolution; scaling the
+        // images independently changes that layout and samples stale guest RAM.
+        r.res_multiplier = 1.0f;
+        LOG_INFO_ONCE("Golden Abyss: native resolution required for packed material aliases (requested {}x)", cc.resolution_multiplier);
+    }
+#endif
     r.set_vsync_state(cc.v_sync);
     r.set_surface_sync_state(cc.disable_surface_sync);
     r.set_screen_filter(cc.screen_filter);

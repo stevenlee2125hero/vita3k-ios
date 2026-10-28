@@ -32,3 +32,8 @@ Tests must include the existing suites plus real glslang generation of the
 production utility functions, spirv-val and SPIRV-Cross MSL translation. The
 latter checks type correctness, not Apple GPU results. iPhone A16 visual
 acceptance remains outstanding until the user tests the complete IPA.
+
+The iOS Vulkan PCSD00001 profile also enforces native (1x) resolution at renderer
+configuration time. The existing observed RG32/RGBA8 raw alias path explicitly
+rejects upscaling, which otherwise falls back to stale CPU data. This does not
+mutate the user's saved graphics setting; unrelated titles retain that setting.
