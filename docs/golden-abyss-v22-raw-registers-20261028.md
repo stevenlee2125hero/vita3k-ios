@@ -16,11 +16,12 @@ contract for arbitrary NaN/subnormal payloads. This is a concrete gap in the
 previous contract, not proof that the A16 driver actually corrupted those words.
 
 This candidate uses uint4 input, temporary, internal and output banks only for
-Vulkan fragment variants targeting packed RG32. Numeric operations still use
+Vulkan fragment variants of the title. Both the RG32 producer and the
+RGBA8 lighting consumer use byte/half packed input registers, so restricting
+raw banks to the producer would leave the sampling half unprotected. Numeric operations still use
 float values via bitcasts at the instruction boundary. Integer moves remain
 integer, including masked/cross-vector stores. Packed byte/half/FX10 helper
-interfaces use uint words under the existing title policy. Non-packed variants
-retain float banks. Uniform registers remain on the existing float path.
+interfaces use uint words under the existing title policy. Other titles and vertex variants retain float banks. Uniform registers remain on the existing float path.
 The final packed export loads raw UINT32 words without normalization.
 
 Retain v20's proven blend attachment lifetime repair, v21's integer attachment

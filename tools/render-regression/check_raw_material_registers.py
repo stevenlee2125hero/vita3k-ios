@@ -103,6 +103,8 @@ int main(int argc, char** argv) {
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     (tmp / 'util').mkdir()
+    (tmp / 'SPIRV').mkdir()
+    (tmp / 'SPIRV/GLSL.std.450.h').write_text('#include <spirv/unified1/GLSL.std.450.h>\n')
     (tmp / 'util/log.h').write_text('''#pragma once
 #include <cassert>
 #include <fmt/format.h>

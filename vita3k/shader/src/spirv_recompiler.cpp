@@ -894,8 +894,7 @@ static SpirvShaderParameters create_parameters(spv::Builder &b, const SceGxmProg
     // loads/stores: integer attachments alone do not protect those earlier
     // NaN/subnormal bit patterns. Keep the input/temporary/internal/output banks raw.
     const bool raw_material_registers = translation_state.is_vulkan && program.is_fragment()
-        && features.preserve_packed_rg32
-        && gxm::get_base_format(translation_state.hints->color_format) == SCE_GXM_COLOR_BASE_FORMAT_F32F32;
+        && features.preserve_packed_rg32;
     const spv::Id word_v4_type = raw_material_registers ? b.makeVectorType(b.makeUintType(32), 4) : f32_v4_type;
     spv::Id pa_arr_type = b.makeArrayType(word_v4_type, b.makeIntConstant(REG_PA_COUNT / 4), 0);
     spv::Id sa_arr_type = b.makeArrayType(f32_v4_type, b.makeIntConstant(REG_SA_COUNT / 4), 0);
