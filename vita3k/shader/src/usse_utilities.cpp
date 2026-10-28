@@ -85,7 +85,10 @@ spv::Id finalize(spv::Builder &b, spv::Id first, spv::Id second, const Swizzle4 
     for (auto i = 0; i < 4; i++) {
         if (dest_mask & (1 << i)) {
             if ((int)swizz[i] >= (int)SwizzleChannel::C_0) {
-                ops.push_back(get_correspond_constant_with_channel(b, swizz[i]));
+                spv::Id constant = get_correspond_constant_with_channel(b, swizz[i]);
+                if (b.isUintType(target_type))
+                    constant = b.createUnaryOp(spv::OpBitcast, target_type, constant);
+                ops.push_back(constant);
             } else if (offset_is_const) {
                 int access_offset = offset_value % 4 + (int)swizz[i] - (int)SwizzleChannel::C_X;
                 spv::Id access_base = first;
@@ -175,10 +178,11 @@ static spv::Function *make_fx10_unpack_func(spv::Builder &b, const SpirvUtilFunc
     spv::Id type_f32 = b.makeFloatType(32);
     spv::Id type_f32_v3 = b.makeVectorType(type_f32, 3);
 
+    const spv::Id raw_parameter_type = features.preserve_packed_rg32 ? b.makeUintType(32) : type_f32;
     spv::Function *fx10_unpack_func = b.makeFunctionEntry(
-        spv::NoPrecision, type_f32_v3, "unpack3xFX10", spv::LinkageTypeMax, { type_f32 },
+        spv::NoPrecision, type_f32_v3, "unpack3xFX10", spv::LinkageTypeMax, { raw_parameter_type },
         decorations, &fx10_unpack_func_block);
-    b.setupFunctionDebugInfo(fx10_unpack_func, "unpack3xFX10", { type_f32 }, { "to_unpack" });
+    b.setupFunctionDebugInfo(fx10_unpack_func, "unpack3xFX10", { raw_parameter_type }, { "to_unpack" });
     fx10_unpack_func->setReturnPrecision(spv::DecorationRelaxedPrecision);
 
     spv::Id extracted = fx10_unpack_func->getParamId(0);
@@ -233,7 +237,7 @@ static spv::Function *make_fx10_pack_func(spv::Builder &b, const SpirvUtilFuncti
 
     // Create function entry: float pack3xFX10(vec3 to_pack)
     spv::Function *fx10_pack_func = b.makeFunctionEntry(
-        spv::NoPrecision, type_f32, "pack3xFX10", spv::LinkageTypeMax, { vec3_f32 },
+        spv::NoPrecision, features.preserve_packed_rg32 ? type_u32 : type_f32, "pack3xFX10", spv::LinkageTypeMax, { vec3_f32 },
         decorations, &fx10_pack_func_block);
     b.setupFunctionDebugInfo(fx10_pack_func, "pack3xFX10", { vec3_f32 }, { "to_pack" });
 
@@ -272,7 +276,8 @@ static spv::Function *make_fx10_pack_func(spv::Builder &b, const SpirvUtilFuncti
     }
 
     // Bitcast the packed uint into a float (bitwise equivalent)
-    packed = b.createUnaryOp(spv::OpBitcast, type_f32, packed);
+    if (!features.preserve_packed_rg32)
+        packed = b.createUnaryOp(spv::OpBitcast, type_f32, packed);
 
     // Return the packed float
     b.makeReturn(false, packed);
@@ -339,15 +344,17 @@ static spv::Function *make_unpack_func(spv::Builder &b, const FeatureState &feat
         return nullptr;
     }
 
+    const spv::Id raw_parameter_type = features.preserve_packed_rg32 ? b.makeUintType(32) : type_f32;
     spv::Function *unpack_func = b.makeFunctionEntry(
-        spv::NoPrecision, output_type, func_name.c_str(), spv::LinkageTypeMax, { type_f32 },
+        spv::NoPrecision, output_type, func_name.c_str(), spv::LinkageTypeMax, { raw_parameter_type },
         decorations, &unpack_func_block);
-    b.setupFunctionDebugInfo(unpack_func, func_name.c_str(), { type_f32 }, { "to_unpack" });
+    b.setupFunctionDebugInfo(unpack_func, func_name.c_str(), { raw_parameter_type }, { "to_unpack" });
     unpack_func->setReturnPrecision(spv::DecorationRelaxedPrecision);
     spv::Id extracted = unpack_func->getParamId(0);
 
     const spv::Id result_type = is_signed ? type_i32 : type_ui32;
-    extracted = b.createUnaryOp(spv::OpBitcast, result_type, extracted);
+    if (b.getTypeId(extracted) != result_type)
+        extracted = b.createUnaryOp(spv::OpBitcast, result_type, extracted);
 
     const auto comp_bits = 32 / comp_count;
     spv::Id comp_bits_val = b.makeUintConstant(comp_bits);
@@ -418,7 +425,7 @@ static spv::Function *make_pack_func(spv::Builder &b, const FeatureState &featur
     }
 
     spv::Function *pack_func = b.makeFunctionEntry(
-        spv::NoPrecision, type_f32, func_name.c_str(), spv::LinkageTypeMax, { input_type },
+        spv::NoPrecision, features.preserve_packed_rg32 ? type_ui32 : type_f32, func_name.c_str(), spv::LinkageTypeMax, { input_type },
         decorations, &pack_func_block);
     b.setupFunctionDebugInfo(pack_func, func_name.c_str(), { input_type }, { "to_pack" });
 
@@ -438,7 +445,8 @@ static spv::Function *make_pack_func(spv::Builder &b, const FeatureState &featur
         output = b.createOp(spv::OpBitFieldInsert, type_ui32, { output, comp, b.makeIntConstant(comp_bits * i), b.makeIntConstant(comp_bits) });
     }
 
-    output = b.createUnaryOp(spv::OpBitcast, type_f32, output);
+    if (!features.preserve_packed_rg32)
+        output = b.createUnaryOp(spv::OpBitcast, type_f32, output);
 
     b.makeReturn(false, output);
     b.setBuildPoint(last_build_point);
@@ -456,15 +464,17 @@ static spv::Function *make_f16_unpack_func(spv::Builder &b, const SpirvUtilFunct
     spv::Id type_f32 = b.makeFloatType(32);
     spv::Id type_f32_v2 = b.makeVectorType(type_f32, 2);
 
+    const spv::Id raw_parameter_type = features.preserve_packed_rg32 ? b.makeUintType(32) : type_f32;
     spv::Function *f16_unpack_func = b.makeFunctionEntry(
-        spv::NoPrecision, type_f32_v2, "unpack2xF16", spv::LinkageTypeMax, { type_f32 },
+        spv::NoPrecision, type_f32_v2, "unpack2xF16", spv::LinkageTypeMax, { raw_parameter_type },
         decorations, &f16_unpack_func_block);
-    b.setupFunctionDebugInfo(f16_unpack_func, "unpack2xF16", { type_f32 }, { "to_unpack" });
+    b.setupFunctionDebugInfo(f16_unpack_func, "unpack2xF16", { raw_parameter_type }, { "to_unpack" });
     f16_unpack_func->setReturnPrecision(spv::DecorationRelaxedPrecision);
 
     spv::Id extracted = f16_unpack_func->getParamId(0);
 
-    extracted = b.createUnaryOp(spv::OpBitcast, type_ui32, extracted);
+    if (!features.preserve_packed_rg32)
+        extracted = b.createUnaryOp(spv::OpBitcast, type_ui32, extracted);
     extracted = b.createBuiltinCall(type_f32_v2, utils.std_builtins, GLSLstd450UnpackHalf2x16, { extracted });
 
     b.makeReturn(false, extracted);
@@ -484,7 +494,7 @@ static spv::Function *make_f16_pack_func(spv::Builder &b, const SpirvUtilFunctio
     spv::Id type_f32_v2 = b.makeVectorType(type_f32, 2);
 
     spv::Function *f16_pack_func = b.makeFunctionEntry(
-        spv::NoPrecision, type_f32, "pack2xF16", spv::LinkageTypeMax, { type_f32_v2 },
+        spv::NoPrecision, features.preserve_packed_rg32 ? type_ui32 : type_f32, "pack2xF16", spv::LinkageTypeMax, { type_f32_v2 },
         decorations, &f16_pack_func_block);
     b.setupFunctionDebugInfo(f16_pack_func, "pack2xF16", { type_f32_v2 }, { "to_pack" });
 
@@ -493,7 +503,8 @@ static spv::Function *make_f16_pack_func(spv::Builder &b, const SpirvUtilFunctio
 
     // use packHalf2x16
     extracted = b.createBuiltinCall(type_ui32, utils.std_builtins, GLSLstd450PackHalf2x16, { extracted });
-    extracted = b.createUnaryOp(spv::OpBitcast, type_f32, extracted);
+    if (!features.preserve_packed_rg32)
+        extracted = b.createUnaryOp(spv::OpBitcast, type_f32, extracted);
 
     b.makeReturn(false, extracted);
     b.setBuildPoint(last_build_point);
@@ -756,6 +767,9 @@ void buffer_address_access(spv::Builder &b, const SpirvShaderParameters &params,
 }
 
 spv::Id unpack_one(spv::Builder &b, SpirvUtilFunctions &utils, const FeatureState &features, spv::Id scalar, const DataType type) {
+    const spv::Id parameter_type = features.preserve_packed_rg32 ? b.makeUintType(32) : b.makeFloatType(32);
+    if (b.getTypeId(scalar) != parameter_type)
+        scalar = b.createUnaryOp(spv::OpBitcast, parameter_type, scalar);
     switch (type) {
     case DataType::INT8:
     case DataType::UINT8:
@@ -1231,12 +1245,18 @@ spv::Id load(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFunc
         return first_pass;
     }
 
+    const bool raw_words = b.isUintType(utils::unwrap_type(b, b.getTypeId(first_pass)));
+    if (raw_words && op.type == DataType::F32) {
+        first_pass = b.createUnaryOp(spv::OpBitcast,
+            make_vector_or_scalar_type(b, type_f32, b.getNumComponents(first_pass)), first_pass);
+    }
+
     if (size_comp != 4) {
         // Second pass: Do unpack
         first_pass = unpack(b, utils, features, first_pass, op.type, op.swizzle, dest_mask, 0);
     } else if (op.type == DataType::INT32) {
         first_pass = b.createUnaryOp(spv::OpBitcast, make_vector_or_scalar_type(b, b.makeIntType(32), static_cast<int>(dest_comp_count)), first_pass);
-    } else if (op.type == DataType::UINT32) {
+    } else if (op.type == DataType::UINT32 && !raw_words) {
         first_pass = b.createUnaryOp(spv::OpBitcast, make_vector_or_scalar_type(b, b.makeUintType(32), static_cast<int>(dest_comp_count)), first_pass);
     }
 
@@ -1270,7 +1290,7 @@ spv::Id unpack(spv::Builder &b, SpirvUtilFunctions &utils, const FeatureState &f
             extract_ops.push_back(b.makeIntConstant(static_cast<int>(i)));
 
             if (target_comp_count > 1) {
-                extracted = b.createOp(spv::OpVectorExtractDynamic, type_f32, extract_ops);
+                extracted = b.createOp(spv::OpVectorExtractDynamic, utils::unwrap_type(b, target_type), extract_ops);
             }
         }
 
@@ -1340,6 +1360,9 @@ void store(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFuncti
     }
 
     spv::Id type_f32 = b.makeFloatType(32);
+    const spv::Id destination_bank = *get_reg_bank(params, dest.bank);
+    const spv::Id destination_vector_type = b.getContainedTypeId(b.getContainedTypeId(b.getTypeId(destination_bank)));
+    const bool raw_words = b.isUintType(b.getContainedTypeId(destination_vector_type));
 
     // FPINTERNAL bank can't pack, always store 32-bit. So bitcast
     if (((dest.bank == RegisterBank::FPINTERNAL) && is_integer_data_type(dest.type))
@@ -1347,7 +1370,8 @@ void store(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFuncti
         std::vector<spv::Id> ops{ source };
         spv::Id bitcast_type = utils::make_vector_or_scalar_type(b, type_f32, total_comp_source);
 
-        source = b.createOp(spv::OpBitcast, bitcast_type, ops);
+        if (!raw_words)
+            source = b.createOp(spv::OpBitcast, bitcast_type, ops);
         dest.type = DataType::F32;
     }
 
@@ -1403,7 +1427,7 @@ void store(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFuncti
                         // Replace it
                         const int actual_offset_start_to_store = insert_offset + (i + nearest_swizz_on) / num_comp_in_float;
                         elem = b.createOp(spv::OpAccessChain, comp_type, { bank_base, b.makeIntConstant(actual_offset_start_to_store >> 2) });
-                        elem = b.createOp(spv::OpVectorExtractDynamic, b.makeFloatType(32), { b.createLoad(elem, spv::NoPrecision), b.makeIntConstant(actual_offset_start_to_store % 4) });
+                        elem = b.createOp(spv::OpVectorExtractDynamic, b.getContainedTypeId(bank_base_elem_type), { b.createLoad(elem, spv::NoPrecision), b.makeIntConstant(actual_offset_start_to_store % 4) });
 
                         // Extract to f16
                         elem = unpack_one(b, utils, features, elem, dest.type);
@@ -1427,7 +1451,7 @@ void store(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFuncti
             source = composites[0];
             total_comp_source = 1;
         } else {
-            spv::Id final_composite_type = b.makeVectorType(type_f32, static_cast<int>(composites.size()));
+            spv::Id final_composite_type = b.makeVectorType(b.getTypeId(composites[0]), static_cast<int>(composites.size()));
 
             // Composite a new vector
             source = b.createCompositeConstruct(final_composite_type, composites);
@@ -1437,6 +1461,13 @@ void store(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFuncti
         // Replace it with a full mask, since we have already pre-process this into storable F32
         dest_mask = 0b1111;
     }
+
+    // The source is a numeric result or a packed word. Convert its *bits*
+    // to the bank storage type once; never use a numerical conversion.
+    const spv::Id bank_scalar_type = b.getContainedTypeId(bank_base_elem_type);
+    const spv::Id stored_type = utils::make_vector_or_scalar_type(b, bank_scalar_type, total_comp_source);
+    if (b.getTypeId(source) != stored_type)
+        source = b.createUnaryOp(spv::OpBitcast, stored_type, source);
 
     // Now we do store!
     if (total_comp_source == 1) {
@@ -1478,7 +1509,7 @@ void store(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFuncti
         }
     }
 
-    spv::Id shuffled = b.createOp(spv::OpVectorShuffle, b.makeVectorType(type_f32, 4), ops);
+    spv::Id shuffled = b.createOp(spv::OpVectorShuffle, bank_base_elem_type, ops);
     b.createStore(shuffled, elem);
 
     // Check if there's leftover to be stored to next vec4 element.

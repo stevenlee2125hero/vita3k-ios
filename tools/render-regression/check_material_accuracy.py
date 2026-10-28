@@ -75,6 +75,7 @@ struct Builder {
  Id makeCompositeConstant(Id type,std::initializer_list<Id>){types[next]=type;return next++;}
  Id createLoad(Id var,int){if(types.contains(var))return var;types[4]=1;return 4;}
  Id createOp(int op,Id type,std::initializer_list<Id> args){assert(op==OpImageRead);assert(type==types[*args.begin()]-10);types[next]=type;return next++;}
+ Id getTypeId(Id id){return types.at(id);}
  void setPrecision(Id,int){}
  Id createCompositeConstruct(Id type,std::initializer_list<Id>){types[next]=type;return next++;}
  Id createUnaryOp(int,Id type,Id){types[next]=type;return next++;}

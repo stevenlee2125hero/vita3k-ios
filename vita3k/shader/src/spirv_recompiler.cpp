@@ -890,13 +890,20 @@ static SpirvShaderParameters create_parameters(spv::Builder &b, const SceGxmProg
     spv::Id b_type = b.makeBoolType();
 
     spv::Id f32_v4_type = b.makeVectorType(f32_type, 4);
-    spv::Id pa_arr_type = b.makeArrayType(f32_v4_type, b.makeIntConstant(REG_PA_COUNT / 4), 0);
+    // Packed material words must not cross floating-point private-memory
+    // loads/stores: integer attachments alone do not protect those earlier
+    // NaN/subnormal bit patterns. Keep the input/temporary/internal/output banks raw.
+    const bool raw_material_registers = translation_state.is_vulkan && program.is_fragment()
+        && features.preserve_packed_rg32
+        && gxm::get_base_format(translation_state.hints->color_format) == SCE_GXM_COLOR_BASE_FORMAT_F32F32;
+    const spv::Id word_v4_type = raw_material_registers ? b.makeVectorType(b.makeUintType(32), 4) : f32_v4_type;
+    spv::Id pa_arr_type = b.makeArrayType(word_v4_type, b.makeIntConstant(REG_PA_COUNT / 4), 0);
     spv::Id sa_arr_type = b.makeArrayType(f32_v4_type, b.makeIntConstant(REG_SA_COUNT / 4), 0);
-    spv::Id i_arr_type = b.makeArrayType(f32_v4_type, b.makeIntConstant(REG_I_COUNT / 4), 0);
-    spv::Id temp_arr_type = b.makeArrayType(f32_v4_type, b.makeIntConstant(REG_TEMP_COUNT / 4), 0);
+    spv::Id i_arr_type = b.makeArrayType(word_v4_type, b.makeIntConstant(REG_I_COUNT / 4), 0);
+    spv::Id temp_arr_type = b.makeArrayType(word_v4_type, b.makeIntConstant(REG_TEMP_COUNT / 4), 0);
     spv::Id index_arr_type = b.makeArrayType(i32_type, b.makeIntConstant(REG_INDEX_COUNT / 4), 0);
     spv::Id pred_arr_type = b.makeArrayType(b_type, b.makeIntConstant(REG_PRED_COUNT / 4), 0);
-    spv::Id o_arr_type = b.makeArrayType(f32_v4_type, b.makeIntConstant(REG_O_COUNT / 4), 0);
+    spv::Id o_arr_type = b.makeArrayType(word_v4_type, b.makeIntConstant(REG_O_COUNT / 4), 0);
 
     // Create register banks
     spv_params.ins = b.createVariable(spv::NoPrecision, spv::StorageClassPrivate, pa_arr_type, "pa");
@@ -1495,11 +1502,16 @@ static spv::Function *make_frag_finalize_function(spv::Builder &b, const SpirvSh
         }
     }
 
+    const bool raw_material_output = translate_state.is_vulkan && features.preserve_packed_rg32
+        && gxm::get_base_format(translate_state.hints->color_format) == SCE_GXM_COLOR_BASE_FORMAT_F32F32;
+    if (raw_material_output)
+        color_val_operand.type = DataType::UINT32;
+
     spv::Id color = spv::NoResult;
 
     color = utils::load(b, parameters, utils, features, color_val_operand, 0xF, reg_off);
 
-    if (!is_float_data_type(color_val_operand.type))
+    if (!raw_material_output && !is_float_data_type(color_val_operand.type))
         color = utils::convert_to_float(b, utils, color, color_val_operand.type, true);
 
     if (program.is_frag_color_used() && features.should_use_shader_interlock()) {
@@ -1544,7 +1556,8 @@ static spv::Function *make_frag_finalize_function(spv::Builder &b, const SpirvSh
             && gxm::get_base_format(translate_state.hints->color_format) == SCE_GXM_COLOR_BASE_FORMAT_F32F32;
         const spv::Id output_type = b.makeVectorType(packed_rg32 ? b.makeUintType(32) : b.makeFloatType(32), 4);
         if (packed_rg32) {
-            color = b.createUnaryOp(spv::OpBitcast, output_type, color);
+            if (b.getTypeId(color) != output_type)
+                color = b.createUnaryOp(spv::OpBitcast, output_type, color);
             precision = spv::NoPrecision;
         }
         spv::Id out = b.createVariable(precision, spv::StorageClassOutput, output_type, "out_color");
