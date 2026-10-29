@@ -47,9 +47,16 @@ jobs:
           icds=(/usr/share/vulkan/icd.d/lvp_icd*.json)
           test -f "${icds[0]}"
           export VK_DRIVER_FILES="${icds[0]}"
-          python3 tools/render-regression/check_complex_alu.py
+          python3 tools/render-regression/check_complex_alu.py --output-dir artifacts/complex-alu
       - name: Test uniform-container mapping and declaration ordering
         run: python3 tools/render-regression/check_uniform_container.py
+
+      - name: Upload synthetic shader validation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: complex-alu-validation
+          path: artifacts/complex-alu/
+          if-no-files-found: error
 
   unsigned-ipa:
     needs: complex-alu
@@ -107,6 +114,16 @@ jobs:
             exit 1
           }
           cmake --version
+
+      - name: Download validated synthetic shader
+        uses: actions/download-artifact@v4
+        with:
+          name: complex-alu-validation
+          path: artifacts/complex-alu
+
+      - name: Compile generated MSL with Apple's iPhone compiler
+        run: |
+          xcrun --sdk iphoneos metal -std=ios-metal2.3 -c artifacts/complex-alu/complex.metal -o artifacts/complex-alu/complex.air
 
       - name: Bootstrap pinned vcpkg
         run: |

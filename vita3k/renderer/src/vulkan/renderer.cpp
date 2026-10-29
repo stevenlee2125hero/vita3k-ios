@@ -947,7 +947,7 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
 
 void VKState::late_init(const Config &cfg, const std::string_view game_id, MemState &mem) {
 #ifdef VITA3K_PLATFORM_IOS
-    LOG_INFO("iOS compatibility v22: raw packed-material register banks; stable blend lifetime; exact material crops; synchronous pipelines");
+    LOG_INFO("iOS compatibility v23: base-2 USSE ALU; uniform-container SA mappings; raw packed-material registers; stable blend lifetime; exact material crops; synchronous pipelines");
 #endif
     this->mem = &mem;
 

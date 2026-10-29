@@ -6,10 +6,15 @@ validate SPIR-V, translate to MSL, and dispatch the compute module on lavapipe.
 This exercises the lowering, not GXP decoding or an Apple GPU.
 """
 from pathlib import Path
+import argparse
+import shutil
 import re
 import subprocess
 import tempfile
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--output-dir", type=Path)
+args = parser.parse_args()
 root = Path(__file__).resolve().parents[2]
 alu = (root / 'vita3k/shader/src/translator/alu.cpp').read_text()
 cases = []
@@ -145,3 +150,8 @@ target_link_libraries(alu_test PRIVATE SPIRV glslang fmt::fmt Threads::Threads V
     old = subprocess.run([str(tmp/'build/alu_test'), str(tmp/'legacy.spv'), 'legacy'], text=True, capture_output=True)
     assert old.returncode == 1 and 'numeric mismatch' in old.stderr, old
     print('PASS: natural-base mutation rejected; valid SPIR-V and MSL generated')
+
+    if args.output_dir:
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        for name in ("complex.spv", "complex.metal"):
+            shutil.copy2(tmp/name, args.output_dir/name)
