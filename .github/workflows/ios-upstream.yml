@@ -32,7 +32,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  complex-alu:
+    name: Execute USSE complex ALU on lavapipe
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shader and software Vulkan test dependencies
+        run: sudo apt-get update && sudo apt-get install -y glslang-dev libfmt-dev spirv-tools spirv-cross spirv-headers libvulkan-dev mesa-vulkan-drivers
+      - name: Restore pinned SPIR-V builder
+        run: git submodule update --init --depth 1 external/glslang
+      - name: Execute production lowering and reject old natural-base semantics
+        run: |
+          icds=(/usr/share/vulkan/icd.d/lvp_icd*.json)
+          test -f "${icds[0]}"
+          export VK_DRIVER_FILES="${icds[0]}"
+          python3 tools/render-regression/check_complex_alu.py
+
   unsigned-ipa:
+    needs: complex-alu
     name: Upstream core arm64 device link
     # Use Intel hosts to avoid the macOS arm64 runner capacity queue.
     # Xcode still cross-compiles the application and dependencies for iPhone arm64.
