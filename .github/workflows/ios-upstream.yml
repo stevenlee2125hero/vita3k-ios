@@ -48,6 +48,8 @@ jobs:
           test -f "${icds[0]}"
           export VK_DRIVER_FILES="${icds[0]}"
           python3 tools/render-regression/check_complex_alu.py
+      - name: Test uniform-container mapping and declaration ordering
+        run: python3 tools/render-regression/check_uniform_container.py
 
   unsigned-ipa:
     needs: complex-alu
