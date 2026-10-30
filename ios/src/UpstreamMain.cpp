@@ -519,6 +519,7 @@ bool initialize_session(const fs::path &storage_path, Root &root_paths,
         });
 
         LOG_INFO("{}", window_title);
+        LOG_INFO("GoldenAbyss v24: commit {}; v22-derived core; MoltenVK 1.4.1; shader cache 24", VITA3K_GA_BUILD_COMMIT);
         LOG_INFO("iOS storage path: {}", storage_path);
 
         emuenv = std::make_unique<EmuEnvState>();

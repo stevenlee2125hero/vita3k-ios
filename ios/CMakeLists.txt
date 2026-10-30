@@ -32,6 +32,15 @@ if(VITA3K_BUILD_IOS_UPSTREAM_CORE)
         ${VITA3K_IOS_CUELUME_LICENSE}
         ${CMAKE_CURRENT_SOURCE_DIR}/Assets.xcassets
     )
+    execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        OUTPUT_VARIABLE GOLDEN_ABYSS_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE
+        COMMAND_ERROR_IS_FATAL ANY)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/GoldenAbyss-Provenance.txt"
+        "BUILD_LABEL=GoldenAbyss-v24\nPORT_COMMIT=${GOLDEN_ABYSS_COMMIT}\nV22_BUILD_SOURCE=2d7dd0c5c84bf2e8fff0cc3264560a8a395a773a\nALU_UNIFORM_SOURCE=0db166640dd7bc90ae9e5433ffc440ce114afd05\nMOLTENVK=1.4.1\nSHADER_CACHE=24\n")
+    target_sources(Vita3KiOS PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/GoldenAbyss-Provenance.txt")
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/GoldenAbyss-Provenance.txt"
+        PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    target_compile_definitions(Vita3KiOS PRIVATE VITA3K_GA_BUILD_COMMIT="${GOLDEN_ABYSS_COMMIT}")
     # Compile the app-icon asset catalog (Xcode generator runs actool) so the
     # Tsubomi flower is the home-screen icon.
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/Assets.xcassets

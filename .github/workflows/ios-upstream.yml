@@ -6,6 +6,7 @@ on:
     branches:
       - ios-upstream-core
       - fix-uncharted-golden-abyss
+      - fix-golden-abyss-v22-audit
     paths:
       - "CMakeLists.txt"
       - "vcpkg.json"
@@ -13,6 +14,7 @@ on:
       - "vita3k/**"
       - "external/**"
       - ".ci/package-ios.sh"
+      - ".ci/verify-golden-abyss-ipa.py"
       - ".github/workflows/ios-upstream.yml"
   pull_request:
     paths:
@@ -212,12 +214,15 @@ jobs:
           bash ./.ci/package-ios.sh \
             --build-dir build-ios-upstream \
             --configuration Release \
-            --output artifacts/Vita3K-upstream-core-iOS-unsigned.ipa
+            --output artifacts/Vita3K-GoldenAbyss-v24-unsigned.ipa
+          python3 .ci/verify-golden-abyss-ipa.py artifacts/Vita3K-GoldenAbyss-v24-unsigned.ipa
 
       - name: Upload unsigned upstream-core IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Vita3K-upstream-core-iOS-${{ github.sha }}-unsigned
-          path: artifacts/Vita3K-upstream-core-iOS-unsigned.ipa
+          name: Vita3K-GoldenAbyss-v24-${{ github.sha }}-unsigned
+          path: |
+            artifacts/Vita3K-GoldenAbyss-v24-unsigned.ipa
+            artifacts/Vita3K-GoldenAbyss-v24-unsigned.verification.json
           if-no-files-found: error
           retention-days: 14
