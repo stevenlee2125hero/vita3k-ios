@@ -3017,14 +3017,23 @@ int main(int argc, char *argv[]) {
     // library instead of leaving a dead process behind (the old "freeze").
     bool app_terminating = false;
     bool jit_pool_prewarmed = g_jit_pool_ready.load(std::memory_order_relaxed);
+    // Preserve guest-driven LoadExec across session cleanup (e.g. Golden Abyss
+    // switches from eboot.bin to uncharted.self).
+    std::optional<AppLaunchRequest> pending_relaunch;
+    std::optional<Vita3KIOSSettings> pending_relaunch_settings;
     while (!app_terminating) {
-    auto launch_request = choose_boot_title(*emuenv);
+    const bool is_relaunch = pending_relaunch.has_value();
+    auto launch_request = is_relaunch
+        ? std::exchange(pending_relaunch, std::nullopt)
+        : choose_boot_title(*emuenv);
     if (!launch_request)
         break;
 
     // Per-game override: snapshot the runtime config, apply the override for
     // this session only, and restore the snapshot when the session ends.
-    const auto session_settings = std::exchange(g_pending_game_settings, std::nullopt);
+    const auto session_settings = is_relaunch
+        ? std::exchange(pending_relaunch_settings, std::nullopt)
+        : std::exchange(g_pending_game_settings, std::nullopt);
     const auto saved_current_config = emuenv->cfg.current_config;
     const auto restore_global_config = [&] {
         if (session_settings) {
@@ -3036,7 +3045,8 @@ int main(int argc, char *argv[]) {
     take_cpu_backend_error(); // Drop any failure retained from the previous session.
     app::AppSessionController session_controller(*emuenv);
     SDL_Log("Vita3K iOS: begin_launch '%s'", launch_request->app_path.c_str());
-    if (!session_controller.begin_launch(*launch_request)) {
+    if (!session_controller.begin_launch(*launch_request,
+            launch_request->reason != AppLaunchReason::LoadExec)) {
         LOG_ERROR("Could not prepare app '{}' for launch.", launch_request->app_path);
         restore_global_config();
         vita3k_ios_show_boot_error(
@@ -3210,7 +3220,14 @@ int main(int argc, char *argv[]) {
     Uint64 playtime_checkpoint_ms = perf_last_ms;
 
     IOSInputSession text_input;
-    bool running = true;
+    std::optional<AppLaunchRequest> session_relaunch;
+    // A game may request LoadExec before the first frontend event tick.
+    if (auto request = emuenv->take_app_launch_request()) {
+        session_relaunch = std::move(request);
+        LOG_INFO("iOS early guest relaunch: title='{}' self='{}'",
+            session_relaunch->app_path, session_relaunch->self_path);
+    }
+    bool running = !session_relaunch.has_value();
     while (running) {
         vita3k_ios_autorelease([&] {
             SDL_Event event;
@@ -3341,8 +3358,9 @@ int main(int argc, char *argv[]) {
             }
 
             if (auto request = emuenv->take_app_launch_request()) {
-                // In-process relaunch (LoadExec) is not supported yet on iOS.
-                LOG_WARN("Title requested relaunch of '{}'; stopping instead.", request->self_path);
+                session_relaunch = std::move(request);
+                LOG_INFO("iOS guest relaunch requested: title='{}' self='{}'",
+                    session_relaunch->app_path, session_relaunch->self_path);
                 running = false;
             }
 
@@ -3369,9 +3387,17 @@ int main(int argc, char *argv[]) {
     guest_watchdog.join();
     vita3k_ios_hide_perf_overlay();
     vita3k_ios_hide_virtual_controller();
+    // Stop all old guest CPU/render/JIT state before launching the new SELF.
+    // Do not send LoadExec back through the user's library picker.
+    const bool relaunch_requested = session_relaunch.has_value() && !app_terminating;
+    if (relaunch_requested) {
+        pending_relaunch = std::move(session_relaunch);
+        pending_relaunch_settings = session_settings;
+    }
     session_controller.stop(app_terminating
             ? app::AppSessionStopReason::FrontendShutdown
-            : app::AppSessionStopReason::UserRequest);
+            : relaunch_requested ? app::AppSessionStopReason::Relaunch
+                                 : app::AppSessionStopReason::UserRequest);
     if (has_virtual_controller)
         vita3k_ios_detach_virtual_controller();
 
@@ -3385,7 +3411,10 @@ int main(int argc, char *argv[]) {
         boot_error = take_cpu_backend_error();
     if (!boot_error.empty())
         vita3k_ios_show_boot_error(boot_error);
-    LOG_INFO("Returning to game library");
+    if (relaunch_requested)
+        LOG_INFO("Restarting guest with requested SELF '{}'.", pending_relaunch->self_path);
+    else
+        LOG_INFO("Returning to game library");
     } // while (!app_terminating)
 
     SDL_DestroyWindow(window);
